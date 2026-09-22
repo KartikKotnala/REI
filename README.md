@@ -1,6 +1,12 @@
 # REI: Repository Evolution Intelligence
+### LLM-RAG Software Change-Impact Analysis Engine
 
-> **LLM-RAG Software Change-Impact Analysis Engine**  
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/Frontend-React%2018%20%2B%20Vite-61DAFB.svg)](https://reactjs.org/)
+[![NetworkX](https://img.shields.io/badge/Graph-NetworkX-orange.svg)](https://networkx.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 > Predicting and ranking transitive software breakages, state mutations, and microservice boundary impacts using graph structures and specialized Sub-13B LLMs.
 
 ---
@@ -39,11 +45,46 @@ Engineers and DevOps teams today face two distinct and flawed extremes when atte
 
 ---
 
-## 2. Mathematical Modeling of the Built System
+## 2. System Architecture
+
+```text
+                               +-------------------------------------------------+
+                               |           Proposed Code Change Input            |
+                               |          (Target Symbol + Diff Snippet)         |
+                               +------------------------+------------------------+
+                                                        |
+                         +------------------------------+------------------------------+
+                         |                                                             |
+                         v                                                             v
+        +----------------------------------+                         +----------------------------------+
+        |          Architecture 1:         |                         |          Architecture 2:         |
+        |      Static Dependency + RAG     |                         | Hybrid Intelligent Impact Engine |
+        +----------------+-----------------+                         +----------------+-----------------+
+                         |                                                             |
+         [Stage 1: AST Graph Traversal]                                  [Agent 1: Intent & Scope Classifier]
+                         |                                                             |
+         [Stage 2: Dense Vector Retrieval]                               [Multi-Hop Graph RAG Traversal]
+                         |                                                             |
+         [Stage 3: Score & Heuristic Fusion]                             [Specialized Reasoning Agents]
+                         |                                               - Call-Chain Agent (1.3B)
+         [Stage 4: Sub-13B Risk Summarizer]                              - Dataflow / State Agent (6.7B)
+                         |                                               - REST Boundary Agent (7B)
+                         |                                                             |
+                         |                                               [Consensus Re-ranker (3.8B/8B)]
+                         v                                                             v
+        +----------------------------------+                         +----------------------------------+
+        | Deterministic Candidate Impact   |                         | Ranked Impacted Components +     |
+        | List (Fused Severity Score)      |                         | Traceable Proof Chain            |
+        +----------------------------------+                         +----------------------------------+
+```
+
+---
+
+## 3. Mathematical Modeling of the Built System
 
 The current system implements formal graph modeling, vector retrieval fusion, multi-agent consensus, and standard Information Retrieval (IR) evaluation metrics.
 
-### 2.1 Multi-Relational Dependency Graph
+### 3.1 Multi-Relational Dependency Graph
 
 The target repository is formally represented as a directed, multi-relational attributed graph:
 
@@ -56,7 +97,7 @@ Where:
   $$\mathcal{R} = \{\text{DEFINES}, \text{INHERITS\_FROM}, \text{CALLS}, \text{USES\_VARIABLE}, \text{ATTRIBUTE\_ACCESS}, \text{HTTP\_CALLS}\}$$
 * $\mathcal{E} \subseteq \mathcal{V} \times \mathcal{R} \times \mathcal{V}$ is the set of directed labeled edges connecting dependencies.
 
-### 2.2 Architecture 1: Static Dependency + RAG Fusion
+### 3.2 Architecture 1: Static Dependency + RAG Fusion
 
 Given a target symbol $t \in \mathcal{V}$ and a code modification diff query $q$:
 
@@ -78,14 +119,14 @@ Given a target symbol $t \in \mathcal{V}$ and a code modification diff query $q$
 Candidates are then ranked in descending order:
 $$\pi_{\text{static}} = \text{argsort}_{e \in \mathcal{V}} \big( -S_{\text{fusion}}(e) \big)$$
 
-### 2.3 Architecture 2: Multi-Agent Consensus Formulation
+### 3.3 Architecture 2: Multi-Agent Consensus Formulation
 
 In the agentic architecture, specialized reasoning agents ($A = \{a_{\text{call}}, a_{\text{dataflow}}, a_{\text{rest}}\}$) each analyze the change independently using sub-13B LLMs and yield predictions $P_a \subseteq \mathcal{V}$ with confidence score $c_a \in [0, 1]$:
 
 The aggregated consensus agreement score $\mathcal{C}$ across $M = |A|$ agents is modeled as:
 $$\mathcal{C} = \frac{1}{M} \sum_{a \in A} c_a \cdot \frac{|P_a \cap P_{\text{candidates}}|}{|P_a \cup P_{\text{candidates}}|}$$
 
-### 2.4 Evaluation & Benchmarking Metrics
+### 3.4 Evaluation & Benchmarking Metrics
 
 For a set of test scenarios $Q$, predicted impact set $P_q$, and ground truth impacted entities $G_q$:
 
@@ -103,7 +144,7 @@ For a set of test scenarios $Q$, predicted impact set $P_q$, and ground truth im
 
 ---
 
-## 3. Specialized Sub-13B LLM Matrix
+## 4. Specialized Sub-13B LLM Selection Matrix
 
 All reasoning tasks are explicitly allocated to specialized models $\le 13\text{B}$ parameters to allow local execution:
 
@@ -117,13 +158,24 @@ All reasoning tasks are explicitly allocated to specialized models $\le 13\text{
 
 ---
 
-## 4. Project Structure
+## 5. Controlled Testbed: SmartFix Repository
 
-```
+The system is evaluated against **SmartFix**, an AI-powered DevOps equipment troubleshooting platform built with Python microservices:
+* **Microservices**: Orchestrator (Port 8000), RAG Service (Port 8001), Equipment (Port 8002), Safety Engine (Port 8003), History (Port 8004), Spare Parts (Port 8005), Tickets (Port 8006), LLM Gateway (Port 8007).
+* **Extraction Statistics**:
+  * **Files Analyzed**: 29 Python files
+  * **Total AST Entities Extracted**: 719 entities
+  * **Graph Nodes**: 633 nodes
+  * **Relational Edges**: 2,677 dependencies
+
+---
+
+## 6. Project Structure
+
+```text
 REI/
 ├── backend/
 │   ├── main.py                     # FastAPI REST server & API routes
-│   ├── requirements.txt            # Python dependencies
 │   ├── architectures/
 │   │   ├── contracts.py            # Pydantic schemas & Sub-13B LLM model matrix
 │   │   └── simulator.py            # Simulation engine for Static RAG & Hybrid Multi-Agent
@@ -147,12 +199,13 @@ REI/
 │   │       └── EvaluationDashboardView.jsx # Live benchmark comparison dashboard
 │   ├── package.json                # React 18, Vite, Tailwind CSS, Lucide icons
 │   └── vite.config.js              # Vite server & proxy configuration (/api -> :8000)
+├── PROJECT_DOCUMENTATION.md        # Complete academic & technical specification
 └── README.md
 ```
 
 ---
 
-## 5. Installation and Setup
+## 7. Installation and Setup
 
 ### Prerequisites
 * **Python**: Version `3.10` or higher
@@ -162,24 +215,24 @@ REI/
 
 ### Step 1: Install Backend Dependencies
 
-1. Open your terminal in the repository root:
+1. Navigate to the project root:
    ```bash
-   cd backend
+   cd REI
    ```
 2. (Optional but recommended) Create and activate a virtual environment:
-   * **Windows (PowerShell):**
-     ```powershell
-     python -m venv .venv
-     .venv\Scripts\Activate.ps1
-     ```
    * **Linux / macOS:**
      ```bash
      python3 -m venv .venv
      source .venv/bin/activate
      ```
-3. Install the required Python packages:
+   * **Windows (PowerShell):**
+     ```powershell
+     python -m venv .venv
+     .venv\Scripts\Activate.ps1
+     ```
+3. Install required Python packages:
    ```bash
-   pip install -r requirements.txt
+   pip install fastapi uvicorn networkx numpy pydantic scikit-learn
    ```
 
 ---
@@ -188,7 +241,7 @@ REI/
 
 1. Navigate to the `frontend` directory:
    ```bash
-   cd ../frontend
+   cd frontend
    ```
 2. Install npm packages:
    ```bash
@@ -197,7 +250,7 @@ REI/
 
 ---
 
-## 6. Running the Application
+## 8. Running the Application
 
 To run the complete system, start the backend API server and the frontend client in separate terminal windows:
 
@@ -221,7 +274,7 @@ npm run dev
 
 ---
 
-## 7. Interactive Dashboard Views
+## 9. Interactive Dashboard Views
 
 Once the frontend is running, navigate to `http://localhost:3000` to interact with the 5 modules:
 
@@ -238,3 +291,9 @@ Once the frontend is running, navigate to `http://localhost:3000` to interact wi
    * Run the simulator to view predicted impacts, risk levels, and traceable proof chains.
 5. **Evaluation Dashboard (`/evaluation`):**
    * Re-run the benchmark suite across the 5 controlled scenarios to view live Precision, Recall, F1, MRR, MAP, and NDCG@5 metrics.
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
