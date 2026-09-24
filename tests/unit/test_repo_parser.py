@@ -160,5 +160,154 @@ class TestParserGitRefAndCompatibility(unittest.TestCase):
         self.assertGreater(result["total_entities"], 0)
 
 
+class TestDependencyInversionAndInterfaces(unittest.TestCase):
+    """
+    Test suite verifying strict adherence to Dependency Inversion Principle (DIP).
+    Tests abstract interfaces, concrete implementations, and in-memory mock injection.
+    """
+
+    def test_vcs_provider_interface_cannot_be_instantiated(self):
+        """Verify VCSProvider is an ABC and cannot be directly instantiated."""
+        from backend.parser.git_service import VCSProvider
+        with self.assertRaises(TypeError):
+            VCSProvider()
+
+    def test_entity_extractor_interface_cannot_be_instantiated(self):
+        """Verify EntityExtractor is an ABC and cannot be directly instantiated."""
+        from backend.parser.ast_extractor import EntityExtractor
+        with self.assertRaises(TypeError):
+            EntityExtractor()
+
+    def test_git_service_implements_vcs_provider(self):
+        """Verify GitService is a concrete implementation of VCSProvider."""
+        from backend.parser.git_service import GitService, VCSProvider
+        service = GitService()
+        self.assertIsInstance(service, VCSProvider)
+
+    def test_ast_entity_extractor_implements_entity_extractor(self):
+        """Verify ASTEntityExtractor is a concrete implementation of EntityExtractor."""
+        from backend.parser.ast_extractor import ASTEntityExtractor, EntityExtractor
+        extractor = ASTEntityExtractor("/fake/path.py", "fake/path.py", "x = 1")
+        self.assertIsInstance(extractor, EntityExtractor)
+
+    def test_repository_orchestrator_with_pure_mocks(self):
+        """
+        Verify that RepositoryOrchestrator runs in 100% isolation using injected mock abstractions,
+        proving complete decoupling from Git CLI and Python AST internals.
+        """
+        from typing import Any, Dict, List, Optional
+        from backend.parser.git_service import VCSProvider
+        from backend.parser.ast_extractor import EntityExtractor
+        from backend.parser.repo_orchestrator import RepositoryOrchestrator
+
+        class MockVCSProvider(VCSProvider):
+            def resolve_repository(self, path_or_url: Optional[str] = None) -> str:
+                return "/mock/virtual_repo"
+
+            def get_metadata(self, repo_root: str) -> Dict[str, Any]:
+                return {
+                    "repo_name": "mock-virtual-repo",
+                    "git_commit": "mock1234567890abcdef",
+                    "git_branch": "mock-branch",
+                    "git_remote": "https://github.com/mock/virtual_repo.git",
+                }
+
+            def get_tracked_files(self, repo_root: str, ref: Optional[str] = None) -> List[str]:
+                return ["service.py", "README.md"]
+
+            def get_file_content(self, repo_root: str, rel_path: str, ref: Optional[str] = None) -> str:
+                if rel_path == "service.py":
+                    return "def mock_function(): pass"
+                return "Mock Readme"
+
+        class MockEntityExtractor(EntityExtractor):
+            def __init__(self, file_path: str, relative_path: str, source_code: str):
+                self._file_path = file_path
+                self._relative_path = relative_path
+                self._source_code = source_code
+                self._module_name = relative_path.replace("/", ".").rstrip(".py")
+                self._entities = []
+                self._imports = []
+
+            def extract(self) -> List[Dict[str, Any]]:
+                self._entities = [
+                    {
+                        "id": f"{self._module_name}.mock_function",
+                        "name": "mock_function",
+                        "type": "function",
+                        "file_path": self._relative_path,
+                    }
+                ]
+                self._imports = [{"type": "import", "name": "mock_module", "source_file": self._relative_path}]
+                return self._entities
+
+            @property
+            def entities(self) -> List[Dict[str, Any]]:
+                return self._entities
+
+            @property
+            def imports(self) -> List[Dict[str, Any]]:
+                return self._imports
+
+            @property
+            def module_name(self) -> str:
+                return self._module_name
+
+        mock_vcs = MockVCSProvider()
+        orchestrator = RepositoryOrchestrator(vcs_provider=mock_vcs, extractor_cls=MockEntityExtractor)
+        result = orchestrator.parse()
+
+        # Assert orchestrator operated through the mock abstractions
+        self.assertEqual(result["repo_name"], "mock-virtual-repo")
+        self.assertEqual(result["git_branch"], "mock-branch")
+        self.assertEqual(result["total_files"], 2)
+        self.assertEqual(result["python_files"], ["service.py"])
+        # Expect module entity + 1 mock entity = 2 entities
+        self.assertEqual(result["total_entities"], 2)
+        self.assertEqual(len(result["imports"]), 1)
+        self.assertEqual(result["imports"][0]["name"], "mock_module")
+
+    def test_parse_git_repository_dependency_injection(self):
+        """Verify parse_git_repository acts as a composition root accepting injected components."""
+        from typing import Any, Dict, List, Optional
+        from backend.parser.git_service import VCSProvider
+        from backend.parser.ast_extractor import EntityExtractor
+        from backend.parser.repo_parser import parse_git_repository
+
+        class CustomVCS(VCSProvider):
+            def resolve_repository(self, path_or_url: Optional[str] = None) -> str:
+                return "/injected/repo"
+            def get_metadata(self, repo_root: str) -> Dict[str, Any]:
+                return {"repo_name": "injected-repo", "git_commit": "inj123", "git_branch": "inj-b", "git_remote": ""}
+            def get_tracked_files(self, repo_root: str, ref: Optional[str] = None) -> List[str]:
+                return ["app.py"]
+            def get_file_content(self, repo_root: str, rel_path: str, ref: Optional[str] = None) -> str:
+                return "class App: pass"
+
+        class CustomExtractor(EntityExtractor):
+            def __init__(self, file_path: str, relative_path: str, source_code: str):
+                self._relative_path = relative_path
+                self._entities = []
+            def extract(self) -> List[Dict[str, Any]]:
+                self._entities = [{"id": "app.App", "name": "App", "type": "class", "file_path": self._relative_path}]
+                return self._entities
+            @property
+            def entities(self) -> List[Dict[str, Any]]:
+                return self._entities
+            @property
+            def imports(self) -> List[Dict[str, Any]]:
+                return []
+            @property
+            def module_name(self) -> str:
+                return "app"
+
+        res = parse_git_repository(vcs_provider=CustomVCS(), extractor_cls=CustomExtractor)
+        self.assertEqual(res["repo_name"], "injected-repo")
+        self.assertEqual(res["total_files"], 1)
+        self.assertEqual(res["python_files"], ["app.py"])
+        # module entity + custom class entity = 2
+        self.assertEqual(res["total_entities"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
