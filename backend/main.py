@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, Any, List, Optional
 import time
+from pydantic import BaseModel
 
 from backend.parser.repo_parser import parse_smartfix_repository
 from backend.graph.dependency_graph import build_smartfix_dependency_graph
@@ -44,12 +45,19 @@ simulator = REIArchitectureSimulator()
 print("All backend components initialized successfully!")
 
 
+class VectorSearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+
 @app.get("/api/health")
 def health_check():
     return {
         "status": "online",
         "system": "Repository Evolution Intelligence (REI)",
-        "target_repo": "SmartFix Synthetic Controlled Repository",
+        "target_repo": parser_data_cache.get("repo_name", "REI"),
+        "git_branch": parser_data_cache.get("git_branch", ""),
+        "git_commit": parser_data_cache.get("git_commit", ""),
         "entities_count": parser_data_cache["total_entities"],
         "graph_nodes": graph_json_cache["total_nodes"],
         "graph_edges": graph_json_cache["total_edges"],
@@ -73,10 +81,12 @@ def get_dependency_graph():
 
 
 @app.post("/api/vector-db/search")
-def search_vector_kb(query: str, top_k: int = 5):
-    results = vector_kb_cache.search(query, top_k=top_k)
+def search_vector_kb(req: Optional[VectorSearchRequest] = None, query: Optional[str] = None, top_k: int = 5):
+    q = req.query if req else (query or "")
+    k = req.top_k if req else top_k
+    results = vector_kb_cache.search(q, top_k=k)
     return {
-        "query": query,
+        "query": q,
         "count": len(results),
         "results": results,
     }

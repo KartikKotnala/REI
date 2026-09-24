@@ -1,13 +1,19 @@
 """
-Repository Parser Module for SmartFix Controlled Synthetic Repository.
-Extracts fine-grained entities: Functions, Classes, Variables, Attributes, Modules, and REST Endpoints.
+Repository Parser Module for Git-Tracked Repositories.
+Extracts fine-grained entities: Functions, Classes, Variables, Attributes, Modules, and REST Endpoints
+directly from Git repository trees, commits, branches, or remote URLs.
 """
 
 import ast
+import logging
 import os
+import shutil
+import subprocess
+import urllib.parse
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-SMARTFIX_PATH = "/Users/kartikkotnala/Desktop/SmartFix"
+logger = logging.getLogger(__name__)
 
 
 class ASTEntityExtractor(ast.NodeVisitor):
@@ -201,28 +207,232 @@ class ASTEntityExtractor(ast.NodeVisitor):
         self.entities.append(entity)
 
 
-def parse_smartfix_repository(repo_path: str = SMARTFIX_PATH) -> Dict[str, Any]:
+class GitRepoParser:
     """
-    Parses all python files in SmartFix repository and returns structured entities and modules.
+    Parses git-tracked repositories by querying git directly.
+    Supports local working trees, specific commits/branches/refs, and remote git URLs.
     """
-    all_entities: List[Dict[str, Any]] = []
-    all_imports: List[Dict[str, Any]] = []
-    file_map: Dict[str, str] = {}
 
-    for root, _, files in os.walk(repo_path):
-        if ".venv" in root or ".git" in root or "__pycache__" in root:
-            continue
-        for file in files:
-            if file.endswith(".py"):
-                full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(full_path, repo_path)
+    def __init__(self, cache_dir: Optional[str] = None):
+        self.cache_dir = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "rei" / "repos"
+
+    def _run_git(self, cmd: List[str], cwd: Optional[str] = None) -> str:
+        res = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        return res.stdout.strip()
+
+    def resolve_repo_root(self, path_or_url: Optional[str] = None) -> str:
+        """
+        Resolves the repository root path.
+        If a remote git URL is provided, checks local cache/fixtures or clones it.
+        If a local path is provided, finds the git repository root via git rev-parse.
+        If None or invalid path, defaults to the current git repository root.
+        """
+        if path_or_url and (
+            path_or_url.startswith("http://")
+            or path_or_url.startswith("https://")
+            or path_or_url.startswith("git@")
+            or path_or_url.startswith("git://")
+            or path_or_url.startswith("ssh://")
+        ):
+            return self._resolve_remote_url(path_or_url)
+
+        # Local path check
+        if path_or_url and os.path.exists(path_or_url):
+            try:
+                return self._run_git(["git", "-C", path_or_url, "rev-parse", "--show-toplevel"])
+            except Exception:
+                return os.path.abspath(path_or_url)
+
+        # If path_or_url was passed but doesn't exist, check fixture directory or fall back to current repo
+        if path_or_url:
+            base_name = os.path.basename(path_or_url.rstrip("/\\"))
+            fixture_path = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / base_name
+            if fixture_path.exists() and (fixture_path / ".git").exists():
+                return str(fixture_path)
+            logger.warning(
+                f"Specified repository path '{path_or_url}' not found. Falling back to active Git repository."
+            )
+
+        # Fall back to the active git repository containing this file or current working directory
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            return self._run_git(["git", "-C", current_dir, "rev-parse", "--show-toplevel"])
+        except Exception:
+            try:
+                return self._run_git(["git", "rev-parse", "--show-toplevel"])
+            except Exception:
+                return os.getcwd()
+
+    def _resolve_remote_url(self, git_url: str) -> str:
+        """
+        Clones or fetches remote git URL into cache_dir, or uses bundled fixture if present.
+        """
+        url_path = urllib.parse.urlparse(git_url).path.rstrip("/")
+        repo_name = os.path.basename(url_path)
+        if repo_name.endswith(".git"):
+            repo_name = repo_name[:-4]
+
+        # 1. Check bundled fixtures under tests/fixtures/<repo_name>
+        project_root = Path(__file__).resolve().parent.parent.parent
+        fixture_dir = project_root / "tests" / "fixtures" / repo_name
+        if fixture_dir.exists() and (fixture_dir / ".git").exists():
+            return str(fixture_dir)
+
+        # 2. Check local cache directory
+        target_dir = self.cache_dir / repo_name
+        if target_dir.exists() and (target_dir / ".git").exists():
+            return str(target_dir)
+
+        # 3. Clone repository
+        target_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", git_url, str(target_dir)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return str(target_dir)
+        except Exception as e:
+            if fixture_dir.exists():
+                return str(fixture_dir)
+            raise RuntimeError(f"Failed to clone remote git repository from {git_url}: {e}")
+
+    def get_git_metadata(self, repo_root: str) -> Dict[str, Any]:
+        """
+        Extracts metadata directly from Git (commit hash, branch, remote origin URL).
+        """
+        metadata = {
+            "repo_name": os.path.basename(os.path.abspath(repo_root)),
+            "git_commit": "",
+            "git_branch": "",
+            "git_remote": "",
+        }
+        try:
+            metadata["git_commit"] = self._run_git(["git", "-C", repo_root, "rev-parse", "HEAD"])
+        except Exception:
+            pass
+
+        try:
+            metadata["git_branch"] = self._run_git(["git", "-C", repo_root, "rev-parse", "--abbrev-ref", "HEAD"])
+        except Exception:
+            pass
+
+        try:
+            remote = self._run_git(["git", "-C", repo_root, "config", "--get", "remote.origin.url"])
+            metadata["git_remote"] = remote
+            if remote:
+                name = os.path.basename(remote.rstrip("/\\"))
+                if name.endswith(".git"):
+                    name = name[:-4]
+                if name:
+                    metadata["repo_name"] = name
+        except Exception:
+            pass
+
+        return metadata
+
+    def get_tracked_files(self, repo_root: str, ref: Optional[str] = None) -> List[str]:
+        """
+        Lists files tracked by git. If ref is provided, uses git ls-tree; otherwise git ls-files.
+        """
+        try:
+            if ref:
+                output = self._run_git(["git", "-C", repo_root, "ls-tree", "-r", "--name-only", ref])
+            else:
+                output = self._run_git(["git", "-C", repo_root, "ls-files"])
+            files = [line.strip() for line in output.splitlines() if line.strip()]
+            return sorted(files)
+        except Exception as e:
+            logger.warning(f"Error querying git tracked files: {e}. Falling back to os.walk.")
+            files = []
+            for root, _, filenames in os.walk(repo_root):
+                if any(ignored in root for ignored in [".git", ".venv", "__pycache__", "node_modules"]):
+                    continue
+                for f in filenames:
+                    files.append(os.path.relpath(os.path.join(root, f), repo_root))
+            return sorted(files)
+
+    def get_file_content(self, repo_root: str, rel_path: str, ref: Optional[str] = None) -> str:
+        """
+        Reads file content from git object store if ref specified, or from working tree.
+        Safely handles binary files by catching decoding errors.
+        """
+        if ref:
+            try:
+                res = subprocess.run(
+                    ["git", "-C", repo_root, "show", f"{ref}:{rel_path}"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
                 try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        code = f.read()
+                    return res.stdout.decode("utf-8")
+                except UnicodeDecodeError:
+                    return res.stdout.decode("latin-1", errors="ignore")
+            except Exception:
+                return ""
 
-                    file_map[rel_path] = code
-                    tree = ast.parse(code, filename=rel_path)
-                    extractor = ASTEntityExtractor(full_path, rel_path, code)
+        full_path = os.path.join(repo_root, rel_path)
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except UnicodeDecodeError:
+            try:
+                with open(full_path, "r", encoding="latin-1", errors="ignore") as f:
+                    return f.read()
+            except Exception:
+                return ""
+        except IOError:
+            try:
+                res = subprocess.run(
+                    ["git", "-C", repo_root, "show", f"HEAD:{rel_path}"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+                return res.stdout.decode("utf-8", errors="ignore")
+            except Exception:
+                return ""
+
+    def parse(
+        self,
+        path_or_url: Optional[str] = None,
+        ref: Optional[str] = None,
+        file_extensions: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Parses repository directly from Git.
+        Extracts AST entities for Python files and records file maps for all tracked files.
+        """
+        repo_root = self.resolve_repo_root(path_or_url)
+        metadata = self.get_git_metadata(repo_root)
+        tracked_files = self.get_tracked_files(repo_root, ref=ref)
+
+        all_entities: List[Dict[str, Any]] = []
+        all_imports: List[Dict[str, Any]] = []
+        file_map: Dict[str, str] = {}
+        python_files: List[str] = []
+
+        target_exts = tuple(file_extensions) if file_extensions else (".py",)
+
+        for rel_path in tracked_files:
+            full_path = os.path.join(repo_root, rel_path)
+            is_vendor = any(v in rel_path for v in ["node_modules/", "vendor/", "dist/", ".cache/"])
+            is_target = rel_path.endswith(target_exts)
+
+            if is_vendor and not is_target:
+                content = ""
+            else:
+                content = self.get_file_content(repo_root, rel_path, ref=ref)
+
+            file_map[rel_path] = content
+
+            if is_target:
+                python_files.append(rel_path)
+                try:
+                    tree = ast.parse(content, filename=rel_path)
+                    extractor = ASTEntityExtractor(full_path, rel_path, content)
                     extractor.visit(tree)
 
                     mod_entity = {
@@ -234,7 +444,7 @@ def parse_smartfix_repository(repo_path: str = SMARTFIX_PATH) -> Dict[str, Any]:
                         "docstring": ast.get_docstring(tree) or "",
                         "start_line": 1,
                         "end_line": len(extractor.source_lines),
-                        "snippet": code[:300] + "..." if len(code) > 300 else code,
+                        "snippet": content[:300] + "..." if len(content) > 300 else content,
                         "signature": f"module {rel_path}",
                     }
                     all_entities.append(mod_entity)
@@ -244,17 +454,46 @@ def parse_smartfix_repository(repo_path: str = SMARTFIX_PATH) -> Dict[str, Any]:
                         imp["source_file"] = rel_path
                         all_imports.append(imp)
                 except Exception as e:
-                    print(f"Error parsing {rel_path}: {e}")
+                    logger.warning(f"Error parsing AST for {rel_path}: {e}")
 
-    return {
-        "entities": all_entities,
-        "imports": all_imports,
-        "total_files": len(file_map),
-        "total_entities": len(all_entities),
-    }
+        return {
+            "repo_name": metadata["repo_name"],
+            "repo_root": repo_root,
+            "git_commit": metadata["git_commit"],
+            "git_branch": metadata["git_branch"],
+            "git_remote": metadata["git_remote"],
+            "files": tracked_files,
+            "file_map": file_map,
+            "total_files": len(tracked_files),
+            "python_files": python_files,
+            "entities": all_entities,
+            "imports": all_imports,
+            "total_entities": len(all_entities),
+        }
+
+
+def parse_git_repository(
+    repo_path: Optional[str] = None,
+    ref: Optional[str] = None,
+    git_url: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+    file_extensions: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Parses a repository directly from Git (local directory, active repo, or remote URL).
+    """
+    target = git_url or repo_path
+    parser = GitRepoParser(cache_dir=cache_dir)
+    return parser.parse(target, ref=ref, file_extensions=file_extensions)
+
+
+# Backwards compatibility aliases
+parse_repository = parse_git_repository
+parse_smartfix_repository = parse_git_repository
 
 
 if __name__ == "__main__":
-    result = parse_smartfix_repository()
-    print(f"Successfully parsed {result['total_files']} Python files in SmartFix!")
+    result = parse_git_repository()
+    print(f"Git Repository: {result['repo_name']} (branch: {result['git_branch']}, commit: {result['git_commit'][:7] if result['git_commit'] else 'N/A'})")
+    print(f"Tracked Files: {result['total_files']} ({len(result['python_files'])} Python files)")
     print(f"Extracted {result['total_entities']} AST entities.")

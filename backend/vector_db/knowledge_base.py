@@ -3,7 +3,7 @@ Vector Knowledge Base for SmartFix Code Base.
 Vectorizes AST entities and code chunks, providing fast semantic similarity retrieval over repository code.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -53,10 +53,14 @@ class VectorKnowledgeBase:
         return results
 
 
-def build_smartfix_vector_kb() -> VectorKnowledgeBase:
-    parser_data = parse_smartfix_repository()
+def build_smartfix_vector_kb(parser_data: Optional[Dict[str, Any]] = None) -> VectorKnowledgeBase:
+    if parser_data is None:
+        parser_data = parse_smartfix_repository()
     kb = VectorKnowledgeBase(parser_data)
     return kb
+
+
+build_vector_kb = build_smartfix_vector_kb
 
 
 if __name__ == "__main__":

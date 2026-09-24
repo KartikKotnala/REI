@@ -4,7 +4,7 @@ Constructs multi-relational NetworkX graph mapping functions, variables, attribu
 """
 
 import networkx as nx
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from backend.parser.repo_parser import parse_smartfix_repository
 
 
@@ -124,11 +124,15 @@ class DependencyGraphBuilder:
         }
 
 
-def build_smartfix_dependency_graph() -> Dict[str, Any]:
-    parser_data = parse_smartfix_repository()
+def build_smartfix_dependency_graph(parser_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if parser_data is None:
+        parser_data = parse_smartfix_repository()
     builder = DependencyGraphBuilder(parser_data)
     builder.build_graph()
     return builder.to_json()
+
+
+build_dependency_graph = build_smartfix_dependency_graph
 
 
 if __name__ == "__main__":
