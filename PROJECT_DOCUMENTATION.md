@@ -143,7 +143,11 @@ The system was evaluated against **SmartFix**, an AI-powered DevOps equipment tr
   * Sub-13B LLM candidate matrix defined.
   * Evaluation scripts and 5 ground-truth benchmark scenarios configured.
   * React dashboard built and verified with zero compilation errors.
-* **Phase 2 (Upcoming)**:
+* **Phase 2 (In-Progress)**:
   * Deploying local model inference (Ollama / vLLM) for the candidate models.
   * Conducting empirical benchmark runs comparing Static RAG against Hybrid Intelligent Analysis.
   * Performing ablation studies analyzing the latency-vs-accuracy tradeoff of multi-agent re-ranking.
+* **Phase 3 (Upcoming: Universal Polyglot Engine & Dynamic Service Discovery)**:
+  * **Tree-sitter Integration**: Replacing language-specific AST walkers with unified Tree-sitter Concrete Syntax Tree (CST) parsers for high-throughput, incremental syntax processing.
+  * **Multi-Language Support**: Developing entity extractors and call-graph builders for TypeScript/JavaScript, Java, C, and Rust.
+  * **Dynamic Microservice Discovery**: Replacing hardcoded port/regex matching with dynamic service boundary detection via OpenAPI/Swagger specifications, Docker Compose/Kubernetes network manifests, and protobuf/gRPC contract definitions.
