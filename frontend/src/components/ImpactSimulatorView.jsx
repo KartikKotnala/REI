@@ -2,9 +2,42 @@ import React, { useState } from 'react';
 import { Play, Activity, AlertTriangle, CheckCircle, ShieldAlert, Cpu, Layers, ListOrdered } from 'lucide-react';
 
 export default function ImpactSimulatorView() {
-  const [targetSymbol, setTargetSymbol] = useState('RAGService.retrieve');
-  const [filePath, setFilePath] = useState('services/rag/rag_engine.py');
-  const [diffSnippet, setDiffSnippet] = useState('- def retrieve(query, top_k=5):\n+ def retrieve(query, top_k=5, enable_rerank=True):');
+  const PRESET_SCENARIOS = [
+    {
+      name: '1. Orchestrator.parse',
+      symbol: 'RepositoryOrchestrator.parse',
+      file: 'backend/parser/repo_orchestrator.py',
+      diff: '- def parse(self, path_or_url: Optional[str] = None):\n+ def parse(self, path_or_url: Optional[str] = None, enable_caching: bool = True):',
+    },
+    {
+      name: '2. VectorKB.search',
+      symbol: 'VectorKnowledgeBase.search',
+      file: 'backend/vector_db/knowledge_base.py',
+      diff: '- def search(self, query: str, top_k: int = 5):\n+ def search(self, query: str, top_k: int = 5, min_score: float = 0.05):',
+    },
+    {
+      name: '3. GraphBuilder.build',
+      symbol: 'DependencyGraphBuilder.build_graph',
+      file: 'backend/graph/dependency_graph.py',
+      diff: '- def build_graph(self) -> nx.DiGraph:\n+ def build_graph(self, include_transitive: bool = False) -> nx.DiGraph:',
+    },
+    {
+      name: '4. ASTExtractor.extract',
+      symbol: 'ASTEntityExtractor.extract',
+      file: 'backend/parser/ast_extractor.py',
+      diff: '- def extract(self) -> List[Dict[str, Any]]:\n+ def extract(self, strict_mode: bool = False) -> List[Dict[str, Any]]:',
+    },
+    {
+      name: '5. Simulator.static_rag',
+      symbol: 'REIArchitectureSimulator.run_static_rag',
+      file: 'backend/architectures/simulator.py',
+      diff: '- def run_static_rag(self, req: StaticRAGRequest):\n+ def run_static_rag(self, req: StaticRAGRequest, timeout_ms: int = 5000):',
+    },
+  ];
+
+  const [targetSymbol, setTargetSymbol] = useState('RepositoryOrchestrator.parse');
+  const [filePath, setFilePath] = useState('backend/parser/repo_orchestrator.py');
+  const [diffSnippet, setDiffSnippet] = useState('- def parse(self, path_or_url: Optional[str] = None):\n+ def parse(self, path_or_url: Optional[str] = None, enable_caching: bool = True):');
   const [activeTab, setActiveTab] = useState('HYBRID');
 
   const [staticResult, setStaticResult] = useState(null);
@@ -58,7 +91,30 @@ export default function ImpactSimulatorView() {
 
       {/* Target Input Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-        <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Configure Synthetic Code Modification</h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider">Configure Synthetic Code Modification</h3>
+          <span className="text-[11px] font-mono text-indigo-400 bg-indigo-950/60 border border-indigo-900/60 px-2.5 py-0.5 rounded-full">
+            Benchmark Version: v1.0.0
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+          <span className="text-xs font-semibold text-slate-400">Load Benchmark Scenario:</span>
+          {PRESET_SCENARIOS.map((p, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                setTargetSymbol(p.symbol);
+                setFilePath(p.file);
+                setDiffSnippet(p.diff);
+              }}
+              className="px-2.5 py-1 text-xs font-mono rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition"
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Target Symbol / Function</label>

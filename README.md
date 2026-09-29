@@ -158,11 +158,12 @@ All reasoning tasks are explicitly allocated to specialized models $\le 13\text{
 
 ---
 
-## 5. Controlled Testbed: SmartFix Repository
+## 5. Controlled Testbed: SmartFix Repository (Pinned Version: v1.0.0)
 
-The system is evaluated against **SmartFix**, an AI-powered DevOps equipment troubleshooting platform built with Python microservices:
-* **Microservices**: Orchestrator (Port 8000), RAG Service (Port 8001), Equipment (Port 8002), Safety Engine (Port 8003), History (Port 8004), Spare Parts (Port 8005), Tickets (Port 8006), LLM Gateway (Port 8007).
-* **Extraction Statistics**:
+Testing and empirical benchmark evaluations were conducted and strictly pinned against version **`v1.0.0`** of the **SmartFix Controlled Benchmark Testbed**:
+* **Version Identification**: `v1.0.0` (Controlled Benchmark Release)
+* **Target Architecture**: Microservices, repository orchestration, multi-relational AST extraction, vector knowledge bases, and architectural simulation pipelines.
+* **Extraction Statistics (Testbed v1.0.0)**:
   * **Files Analyzed**: 29 Python files
   * **Total AST Entities Extracted**: 719 entities
   * **Graph Nodes**: 633 nodes
@@ -180,13 +181,16 @@ REI/
 │   │   ├── contracts.py            # Pydantic schemas & Sub-13B LLM model matrix
 │   │   └── simulator.py            # Simulation engine for Static RAG & Hybrid Multi-Agent
 │   ├── parser/
-│   │   └── repo_parser.py          # Python AST entity & relationship extractor
+│   │   ├── git_service.py          # VCSProvider interface & GitService implementation
+│   │   ├── ast_extractor.py        # EntityExtractor interface & ASTEntityExtractor implementation
+│   │   ├── repo_orchestrator.py    # RepositoryOrchestrator coordinating parsing
+│   │   └── repo_parser.py          # Composition facade & parse_git_repository factory
 │   ├── graph/
 │   │   └── dependency_graph.py     # NetworkX multi-relational graph builder
 │   ├── vector_db/
 │   │   └── knowledge_base.py       # TF-IDF & vector cosine semantic search
 │   └── evaluation/
-│       ├── benchmark_dataset.py    # 5 controlled synthetic benchmark scenarios
+│       ├── benchmark_dataset.py    # 5 controlled benchmark scenarios pinned to v1.0.0
 │       └── eval_metrics.py         # Precision, Recall, F1, MRR, MAP, NDCG@K formulas
 ├── frontend/
 │   ├── src/
@@ -195,10 +199,13 @@ REI/
 │   │       ├── ArchitecturesView.jsx       # Architecture comparison & model matrix
 │   │       ├── DependencyGraphView.jsx     # Visual graph explorer & entity inspector
 │   │       ├── VectorKBView.jsx            # Semantic vector search workbench
-│   │       ├── ImpactSimulatorView.jsx     # Live diff impact simulator
-│   │       └── EvaluationDashboardView.jsx # Live benchmark comparison dashboard
+│   │       ├── ImpactSimulatorView.jsx     # Live diff impact simulator with preset scenarios
+│   │       └── EvaluationDashboardView.jsx # Live benchmark comparison dashboard (v1.0.0)
 │   ├── package.json                # React 18, Vite, Tailwind CSS, Lucide icons
 │   └── vite.config.js              # Vite server & proxy configuration (/api -> :8000)
+├── tests/
+│   └── unit/
+│       └── test_repo_parser.py     # Unit test suite verifying parser DIP architecture
 ├── PROJECT_DOCUMENTATION.md        # Complete academic & technical specification
 └── README.md
 ```

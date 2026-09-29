@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ArchitecturesView from './components/ArchitecturesView';
 import DependencyGraphView from './components/DependencyGraphView';
 import VectorKBView from './components/VectorKBView';
@@ -8,6 +8,14 @@ import { Layers, GitGraph, Database, Activity, BarChart3, Terminal } from 'lucid
 
 export default function App() {
   const [activeView, setActiveView] = useState('architectures');
+  const [health, setHealth] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then(res => res.json())
+      .then(data => setHealth(data))
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -26,7 +34,8 @@ export default function App() {
 
           <div className="flex items-center gap-2 font-mono text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-900/60 px-3 py-1.5 rounded-full">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Target Repo: SmartFix (29 files / 690 entities)
+            Target Repo: SmartFix ({health?.benchmark_version || 'v1.0.0'})
+            {health?.entities_count ? ` • ${health.entities_count} entities` : ''}
           </div>
         </div>
       </header>

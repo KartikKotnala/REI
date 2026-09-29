@@ -26,18 +26,23 @@ export default function EvaluationDashboardView() {
   if (!evalData && loading) return <div className="p-8 text-slate-400">Running Benchmark Evaluation Scripts...</div>;
   if (!evalData) return <div className="p-8 text-slate-400">Click below to run evaluation benchmark suite.</div>;
 
-  const { static_dependency_rag, hybrid_intelligent_analysis, scenarios_evaluated, scenarios_detail } = evalData;
+  const { static_dependency_rag, hybrid_intelligent_analysis, scenarios_evaluated, scenarios_detail, benchmark_version, benchmark_testbed } = evalData;
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <BarChart3 className="text-indigo-400" /> Evaluation Metrics & Benchmarking Suite
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+              <BarChart3 className="text-indigo-400" /> Evaluation Metrics & Benchmarking Suite
+            </h2>
+            <span className="text-xs font-mono bg-indigo-950 text-indigo-300 border border-indigo-800 px-2.5 py-0.5 rounded-full">
+              Pinned: {benchmark_version || 'v1.0.0'}
+            </span>
+          </div>
           <p className="text-slate-400 text-sm mt-1">
-            Empirical comparison of Prediction Quality, Ranking Quality, and System Performance across {scenarios_evaluated} controlled SmartFix change scenarios.
+            Empirical comparison of Prediction Quality, Ranking Quality, and System Performance across {scenarios_evaluated} controlled change scenarios on {benchmark_testbed || 'SmartFix Benchmark Testbed (v1.0.0)'}.
           </p>
         </div>
         <button
@@ -175,7 +180,12 @@ export default function EvaluationDashboardView() {
 
       {/* Controlled Benchmark Scenarios List */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-        <h3 className="text-lg font-bold text-white">SmartFix Synthetic Controlled Change Scenarios ({scenarios_detail.length})</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-white">Controlled Benchmark Change Scenarios ({scenarios_detail.length})</h3>
+          <span className="text-xs font-mono text-slate-400 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
+            Target Testbed: {benchmark_testbed || 'SmartFix Controlled Benchmark Testbed (v1.0.0)'}
+          </span>
+        </div>
         <div className="space-y-3">
           {scenarios_detail.map((sc, idx) => (
             <div key={idx} className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">

@@ -27,14 +27,18 @@ Conventional change-impact analysis (CIA) relies either on:
 
 The system is decomposed into four foundational layers:
 
-### 3.1. Fine-Grained AST Parser (`backend/parser/repo_parser.py`)
-Built using Python's native `ast` library. Rather than treating code merely as lines of text, the parser walks the abstract syntax tree and extracts distinct typed software entities:
-* **Functions & Methods**: Name, signature, docstring, body snippet, line range, local/global variable references, internal function calls, and async flags.
-* **Classes**: Class name, inheritance bases, docstrings, methods, and attributes.
-* **Variables**: Module-level, class-level, and local scope variables.
-* **Attributes**: Object attributes (`self.x`).
-* **REST Endpoints**: HTTP route decorations (`@app.get`, `@app.post`, etc.).
-* **Modules**: File-level container with import statements.
+### 3.1. Fine-Grained AST Parser & Modular Inversion Engine (`backend/parser/`)
+Built with a modular Dependency Inversion Principle (DIP) architecture across specialized components:
+* **VCS Integration (`backend/parser/git_service.py`)**: Defines the abstract `VCSProvider` interface and concrete `GitService` implementing repository discovery, branch/commit resolution, tracked file filtering, and encoding-safe file content streaming.
+* **AST Entity Extractor (`backend/parser/ast_extractor.py`)**: Defines the abstract `EntityExtractor` interface and concrete `ASTEntityExtractor` utilizing Python's native `ast` library to walk abstract syntax trees and extract typed software entities:
+  * **Functions & Methods**: Name, signature, docstring, body snippet, line range, local/global variable references, internal function calls, and async flags.
+  * **Classes**: Class name, inheritance bases, docstrings, methods, and attributes.
+  * **Variables**: Module-level, class-level, and local scope variables.
+  * **Attributes**: Object attributes (`self.x`).
+  * **REST Endpoints**: HTTP route decorations (`@app.get`, `@app.post`, etc.).
+  * **Modules**: File-level container with import statements.
+* **Repository Orchestrator (`backend/parser/repo_orchestrator.py`)**: Pure orchestration coordinator depending strictly on abstract `VCSProvider` and `EntityExtractor` contracts to coordinate cloning, file traversal, and parallel AST extraction.
+* **Facade & Entrypoint (`backend/parser/repo_parser.py`)**: Exposes public factory functions (`parse_git_repository()`, `parse_smartfix_repository()`) and backwards-compatible aliases.
 
 ### 3.2. Multi-Relational Dependency Knowledge Graph (`backend/graph/dependency_graph.py`)
 Built using `NetworkX`. Nodes represent the extracted entities, and directed edges model structural and architectural relationships:
@@ -88,15 +92,16 @@ To guarantee privacy, low latency, and cost-efficient execution on local hardwar
 
 ---
 
-## 5. Controlled Testbed: SmartFix Repository
+## 5. Controlled Testbed: SmartFix Repository (Pinned Version: v1.0.0)
 
-The system was evaluated against **SmartFix**, an AI-powered DevOps equipment troubleshooting platform built with Python microservices:
-* **Microservices**: Orchestrator (8000), RAG Service (8001), Equipment (8002), Safety Engine (8003), History (8004), Spare Parts (8005), Tickets (8006), LLM Gateway (8007).
-* **Extraction Metrics**:
+Testing and empirical benchmark evaluations were conducted and strictly pinned against version **`v1.0.0`** of the **SmartFix Controlled Benchmark Testbed**:
+* **Version Identification**: `v1.0.0` (Controlled Benchmark Release)
+* **Target Architecture**: Modular microservices and intelligence engine encompassing repository orchestration, multi-relational AST extraction, vector knowledge bases, and architectural simulation pipelines.
+* **Extraction Metrics (Testbed v1.0.0)**:
   * **Files Analyzed**: 29 Python files
   * **AST Entities Extracted**: 719 entities
   * **Graph Nodes**: 633 nodes
-  * **Relational Edges**: 2,677 edges
+  * **Relational Edges**: 2,677 dependencies
 
 ---
 
@@ -113,12 +118,29 @@ The system was evaluated against **SmartFix**, an AI-powered DevOps equipment tr
 * **System Performance**:
   * Execution latency (ms), peak resident set memory (MB), and CPU utilization (%).
 
-### 6.2. Controlled Ground-Truth Scenarios
-1. **Scenario 1 (RAG Service Retrieve Signature Change)**: Modifying `RAGService.retrieve` to accept `enable_rerank: bool`. Ground-truth affected components: Orchestrator `ask_question`, Backend `query_rag`, RAG endpoint `retrieve_documents`.
-2. **Scenario 2 (Safety Engine Rule Update)**: Modifying `SafetyEngine.evaluate` high-voltage rule from `WARNING` to `BLOCKED`. Ground-truth affected components: Orchestrator `ask_question`, Safety endpoint `evaluate_safety`.
-3. **Scenario 3 (Equipment Schema Field Renaming)**: Renaming `serial_number` to `equipment_uuid` in `Equipment` data model. Ground-truth affected components: `get_equipment_details`, Spare parts `check_parts_availability`, History `get_maintenance_history`.
-4. **Scenario 4 (LLM Gateway Generation Parameter Tuning)**: Modifying temperature and top-p in `generate_llm_response`. Ground-truth affected components: Orchestrator `ask_question`, LLM endpoint `generate_diagnosis`.
-5. **Scenario 5 (Ticket Service Payload Mutation)**: Adding required priority level to `create_ticket`. Ground-truth affected components: `TicketRequest` schema, Orchestrator `create_field_ticket`.
+### 6.2. Controlled Ground-Truth Scenarios (Pinned to v1.0.0)
+All evaluation scenarios are grounded in the active codebase and pinned to version **`v1.0.0`**, exercising key architectural interfaces and propagation paths:
+
+1. **Scenario 1 (`SCENARIO_1` | Orchestrator Parse Pipeline Refactoring)**:
+   * **Target Symbol**: `backend.parser.repo_orchestrator.RepositoryOrchestrator.parse`
+   * **Diff**: `- def parse(self, path_or_url: Optional[str] = None):\n+ def parse(self, path_or_url: Optional[str] = None, enable_caching: bool = True):`
+   * **Ground-Truth Impacts**: `backend.parser.repo_parser.parse_git_repository`, `backend.parser.repo_orchestrator.RepositoryOrchestrator`, `backend.parser.git_service.VCSProvider.get_metadata`, `backend.parser.ast_extractor.ASTEntityExtractor.extract`.
+2. **Scenario 2 (`SCENARIO_2` | Vector Search Query Scoring Modification)**:
+   * **Target Symbol**: `backend.vector_db.knowledge_base.VectorKnowledgeBase.search`
+   * **Diff**: `- def search(self, query: str, top_k: int = 5):\n+ def search(self, query: str, top_k: int = 5, min_score: float = 0.05):`
+   * **Ground-Truth Impacts**: `backend.main.search_vector_kb`, `backend.architectures.simulator.REIArchitectureSimulator.run_static_rag`, `backend.vector_db.knowledge_base.build_smartfix_vector_kb`, `backend.vector_db.knowledge_base.VectorKnowledgeBase`.
+3. **Scenario 3 (`SCENARIO_3` | Dependency Graph Edge Builder Optimization)**:
+   * **Target Symbol**: `backend.graph.dependency_graph.DependencyGraphBuilder.build_graph`
+   * **Diff**: `- def build_graph(self) -> nx.DiGraph:\n+ def build_graph(self, include_transitive: bool = False) -> nx.DiGraph:`
+   * **Ground-Truth Impacts**: `backend.graph.dependency_graph.build_smartfix_dependency_graph`, `backend.architectures.simulator.REIArchitectureSimulator.__init__`, `backend.graph.dependency_graph.DependencyGraphBuilder`.
+4. **Scenario 4 (`SCENARIO_4` | AST Entity Extraction Method Signature Update)**:
+   * **Target Symbol**: `backend.parser.ast_extractor.ASTEntityExtractor.extract`
+   * **Diff**: `- def extract(self) -> List[Dict[str, Any]]:\n+ def extract(self, strict_mode: bool = False) -> List[Dict[str, Any]]:`
+   * **Ground-Truth Impacts**: `backend.parser.repo_orchestrator.RepositoryOrchestrator.parse`, `backend.parser.ast_extractor.ASTEntityExtractor`, `backend.parser.ast_extractor.EntityExtractor.extract`.
+5. **Scenario 5 (`SCENARIO_5` | Static RAG Architecture Execution Tuning)**:
+   * **Target Symbol**: `backend.architectures.simulator.REIArchitectureSimulator.run_static_rag`
+   * **Diff**: `- def run_static_rag(self, req: StaticRAGRequest):\n+ def run_static_rag(self, req: StaticRAGRequest, timeout_ms: int = 5000):`
+   * **Ground-Truth Impacts**: `backend.architectures.simulator.REIArchitectureSimulator.run_hybrid_intelligent_analysis`, `backend.main.simulate_static_rag`, `backend.architectures.simulator.REIArchitectureSimulator`.
 
 ---
 

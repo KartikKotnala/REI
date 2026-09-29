@@ -127,51 +127,68 @@ class REIArchitectureSimulator:
         start_time = time.time()
         target = req.change_input.target_symbol
 
-        # Run multi-agent simulation
+        # Candidate Re-ranking & Proof Chains
+        static_resp = self.run_static_rag(StaticRAGRequest(change_input=req.change_input))
+        candidates = static_resp.predicted_impacts
+        ranked_impacts = candidates
+
+        # Build dynamic agent reasoning outputs based on retrieved candidates
+        call_impacts = [
+            {"target": c.entity_id, "risk": c.severity, "reason": f"Direct {c.impact_type} dependency connection"}
+            for c in candidates[:2]
+        ]
+        if not call_impacts:
+            call_impacts = [{"target": target, "risk": "MEDIUM", "reason": "Target symbol analyzed directly"}]
+
         call_agent = AgentReasoningOutput(
             agent_name="Call-Chain Impact Agent",
             agent_role="Function Signature & Caller Analysis",
             specialized_llm_used=CANDIDATE_MODELS_MATRIX["ast_parsing"]["primary_model"],
-            discovered_impacts=[
-                {"target": "services.orchestrator.main.ask_question", "risk": "HIGH", "reason": "Calls modified target directly"},
-                {"target": "services.rag.rag_engine.RAGService.retrieve", "risk": "CRITICAL", "reason": "Upstream data feeder"}
-            ],
+            discovered_impacts=call_impacts,
             confidence_score=0.92,
-            reasoning_summary="Detected breaking argument signature propagation across orchestrator interface."
+            reasoning_summary="Traced function signatures and call-graph dependencies from modified symbol."
         )
+
+        dataflow_impacts = [
+            {"target": c.entity_id, "risk": c.severity, "reason": "Dataflow propagation / state access coupling"}
+            for c in candidates[2:4]
+        ]
+        if not dataflow_impacts and len(candidates) > 0:
+            dataflow_impacts = [{"target": candidates[0].entity_id, "risk": "MEDIUM", "reason": "Secondary state coupling"}]
 
         dataflow_agent = AgentReasoningOutput(
             agent_name="Dataflow & State Agent",
             agent_role="Variable & Attribute Mutation Analysis",
             specialized_llm_used=CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"],
-            discovered_impacts=[
-                {"target": "services.safety.main.SafetyEngine.evaluate", "risk": "HIGH", "reason": "Reads mutated safety rules state"}
-            ],
+            discovered_impacts=dataflow_impacts,
             confidence_score=0.88,
-            reasoning_summary="Identified state mutation side-effect on safety evaluation engine."
+            reasoning_summary="Analyzed variable and attribute mutation side-effects across retrieved candidate scope."
         )
 
+        boundary_candidates = [c for c in candidates if "main" in c.file_path or "api" in c.file_path or c.type == "endpoint"]
+        if not boundary_candidates:
+            boundary_candidates = candidates[4:5] if len(candidates) > 4 else candidates[:1]
+
+        boundary_impacts = [
+            {"target": c.entity_id, "risk": c.severity, "reason": "Component boundary or API exposure point"}
+            for c in boundary_candidates
+        ]
+
         rest_agent = AgentReasoningOutput(
-            agent_name="Microservice Boundary Agent",
-            agent_role="REST Endpoint & Inter-service Communication",
+            agent_name="System Boundary Agent",
+            agent_role="API Endpoint & Inter-Module Communication",
             specialized_llm_used=CANDIDATE_MODELS_MATRIX["graph_translation"]["primary_model"],
-            discovered_impacts=[
-                {"target": "services.orchestrator.main.:8000/ask", "risk": "HIGH", "reason": "Exposes microservice API port 8000"}
-            ],
+            discovered_impacts=boundary_impacts,
             confidence_score=0.95,
-            reasoning_summary="Traced HTTP REST boundary call from Orchestrator port 8000 to Safety port 8003."
+            reasoning_summary="Traced architectural boundaries and exposed system interfaces."
         )
 
         agent_outputs = [call_agent, dataflow_agent, rest_agent]
 
-        # Candidate Re-ranking & Proof Chains
-        static_resp = self.run_static_rag(StaticRAGRequest(change_input=req.change_input))
-        ranked_impacts = static_resp.predicted_impacts
-
         proof_chain = [
             f"[Step 1: Intent Classification] Classified change to '{target}' as API_SIGNATURE_MODIFICATION.",
-            f"[Step 2: Multi-Hop Graph RAG] Retrieved 2 call-graph hops and top vector snippets.",
-            f"[Step 3: Multi-Agent Synthesis] Call-Chain Agent & Dataflow Agent agreed on 3 critical impact nodes.",
+            f"[Step 2: Multi-Hop Graph RAG] Retrieved {len(candidates)} call-graph and vector candidate nodes.",
+            f"[Step 3: Multi-Agent Synthesis] Call-Chain Agent & Dataflow Agent corroborated critical impact nodes.",
             f"[Step 4: Sub-13B Re-ranker ({CANDIDATE_MODELS_MATRIX['consensus_reranking']['primary_model']})] Re-ranked candidates with 94.2% consensus score."
         ]
 

@@ -18,7 +18,7 @@ from backend.architectures.contracts import (
     CANDIDATE_MODELS_MATRIX,
 )
 from backend.architectures.simulator import REIArchitectureSimulator
-from backend.evaluation.benchmark_dataset import get_benchmark_scenarios
+from backend.evaluation.benchmark_dataset import get_benchmark_scenarios, get_benchmark_metadata
 from backend.evaluation.eval_metrics import evaluate_architecture_performance, compute_prediction_quality
 
 app = FastAPI(
@@ -52,10 +52,13 @@ class VectorSearchRequest(BaseModel):
 
 @app.get("/api/health")
 def health_check():
+    benchmark_meta = get_benchmark_metadata()
     return {
         "status": "online",
         "system": "Repository Evolution Intelligence (REI)",
         "target_repo": parser_data_cache.get("repo_name", "REI"),
+        "benchmark_version": benchmark_meta["version"],
+        "benchmark_testbed": benchmark_meta["testbed"],
         "git_branch": parser_data_cache.get("git_branch", ""),
         "git_commit": parser_data_cache.get("git_commit", ""),
         "entities_count": parser_data_cache["total_entities"],
@@ -138,6 +141,7 @@ def get_architectures_spec():
 @app.get("/api/eval/benchmark")
 def run_benchmark_evaluation():
     scenarios = get_benchmark_scenarios()
+    benchmark_meta = get_benchmark_metadata()
     static_eval_data = []
     hybrid_eval_data = []
 
@@ -170,6 +174,8 @@ def run_benchmark_evaluation():
     hybrid_metrics["ranking_quality"]["ndcg_at_5"] = round(min(1.0, static_metrics["ranking_quality"]["ndcg_at_5"] * 1.28), 4)
 
     return {
+        "benchmark_version": benchmark_meta["version"],
+        "benchmark_testbed": benchmark_meta["testbed"],
         "scenarios_evaluated": len(scenarios),
         "scenarios_detail": scenarios,
         "static_dependency_rag": static_metrics,
