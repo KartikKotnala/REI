@@ -165,10 +165,26 @@ All evaluation scenarios are grounded in the active codebase and pinned to versi
   * Sub-13B LLM candidate matrix defined.
   * Evaluation scripts and 5 ground-truth benchmark scenarios configured.
   * React dashboard built and verified with zero compilation errors.
-* **Phase 2 (In-Progress)**:
-  * Deploying local model inference (Ollama / vLLM) for the candidate models.
-  * Conducting empirical benchmark runs comparing Static RAG against Hybrid Intelligent Analysis.
-  * Performing ablation studies analyzing the latency-vs-accuracy tradeoff of multi-agent re-ranking.
+* **Phase 2 (In-Progress: Empirical Benchmarking & System Maturation)**:
+  * **1. Local Model Inference Integration**:
+    * Deploy and integrate local, private LLM inference runtimes (via Ollama, vLLM, or Hugging Face `transformers`) serving OpenAI-compatible endpoints (`http://localhost:11434/v1`).
+    * Wire real sub-13B candidate models (`DeepSeek-Coder-1.3B/6.7B`, `Qwen2.5-Coder-1.5B/7B`, `Phi-3-mini-4K-Instruct 3.8B`) directly into the agent reasoning pipelines, replacing synthetic simulation mock outputs.
+  * **2. Live Model Evaluation & Ablation Suite**:
+    * Execute end-to-end benchmark runs computing real-time Precision, Recall, F1, MRR, MAP, and NDCG@5 metrics with zero artificial multipliers.
+    * Conduct multi-agent ablation studies: quantify the marginal contribution and latency cost of individual agents (Call-Chain vs. Dataflow vs. REST Boundary vs. Consensus Re-ranker) against the baseline Static RAG pipeline.
+  * **3. Real-World Open-Source Target Repository Selection**:
+    * Evaluate and select production-grade target codebases for real-world impact validation:
+      * **`pallets/flask`**: Classic web framework rich in context locals, extension contracts, and dynamic request state mutations.
+    * Extract real historical Pull Requests (PRs) featuring breaking signature changes, field deprecations, and test suite ripple effects to serve as objective ground-truth benchmark datasets.
+  * **4. Hyperparameter, Embedding & Retrieval Experimentation**:
+    * **LLM Selection Comparison**: Benchmarking impact reasoning fidelity across DeepSeek-Coder, Qwen2.5-Coder, Mistral-7B, and Phi-3-mini.
+    * **Top-$K$ & Depth Tuning**: Parameter sweeps across vector retrieval cutoffs ($K \in [3, 5, 10, 20]$) and graph traversal search horizons (depth $D \in [1, 2, 3]$).
+    * **Embedding Techniques**: Comparing sparse lexical search (TF-IDF / BM25) against dense code representations (`Nomic-Embed-Code`, `BGE-Code-v1.5`, `StarCoder2-3B`).
+    * **Chunking Strategies**: Evaluating AST semantic chunking (per function/class boundary) versus fixed-size token chunking with sliding-window overlap.
+    * **Retriever Comparison**: Evaluating Pure Vector RAG vs. Graph-Only Walk vs. Hybrid Graph-Vector Alpha Fusion ($\alpha \in [0.0, 1.0]$).
+  * **5. Interactive Visual DAG (Directed Acyclic Graph) Rendering**:
+    * Implement an interactive DAG visualization view in the React frontend (leveraging React Flow / `@xyflow/react`, D3.js, or Cytoscape.js).
+    * Visually render the directed dependency graph, caller-callee chains, and live impact propagation trees with severity heatmaps (Critical/High/Medium/Low) and traceable proof chains directly on the node canvas.
 * **Phase 3 (Upcoming: Universal Polyglot Engine & Dynamic Service Discovery)**:
   * **Tree-sitter Integration**: Replacing language-specific AST walkers with unified Tree-sitter Concrete Syntax Tree (CST) parsers for high-throughput, incremental syntax processing.
   * **Multi-Language Support**: Developing entity extractors and call-graph builders for TypeScript/JavaScript, Java, C, and Rust.
