@@ -4,18 +4,35 @@ import DependencyGraphView from './components/DependencyGraphView';
 import VectorKBView from './components/VectorKBView';
 import ImpactSimulatorView from './components/ImpactSimulatorView';
 import EvaluationDashboardView from './components/EvaluationDashboardView';
-import { Layers, GitGraph, Database, Activity, BarChart3, Terminal } from 'lucide-react';
+import { Layers, GitGraph, Database, Activity, BarChart3, Terminal, GitBranch } from 'lucide-react';
 
 export default function App() {
   const [activeView, setActiveView] = useState('architectures');
   const [health, setHealth] = useState(null);
+  const [switchingRepo, setSwitchingRepo] = useState(false);
 
-  useEffect(() => {
+  const fetchHealth = () => {
     fetch('/api/health')
       .then(res => res.json())
       .then(data => setHealth(data))
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchHealth();
   }, []);
+
+  const switchRepo = (target) => {
+    setSwitchingRepo(true);
+    fetch('/api/repository/target', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target }),
+    })
+      .then(res => res.json())
+      .then(() => fetchHealth())
+      .finally(() => setSwitchingRepo(false));
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -32,10 +49,53 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 font-mono text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-900/60 px-3 py-1.5 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Target Repo: SmartFix ({health?.benchmark_version || 'v1.0.0'})
-            {health?.entities_count ? ` • ${health.entities_count} entities` : ''}
+          <div className="flex items-center gap-3">
+            {/* Repo Switcher Buttons */}
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-full p-1 text-xs font-mono">
+              <button
+                onClick={() => switchRepo('pallets/flask')}
+                disabled={switchingRepo}
+                className={`px-3 py-1 rounded-full transition flex items-center gap-1.5 ${
+                  health?.target_repo === 'pallets/flask'
+                    ? 'bg-indigo-600 text-white font-bold shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <GitBranch className="w-3.5 h-3.5" />
+                pallets/flask
+              </button>
+              <button
+                onClick={() => switchRepo('SmartFix')}
+                disabled={switchingRepo}
+                className={`px-3 py-1 rounded-full transition flex items-center gap-1.5 ${
+                  health?.target_repo === 'SmartFix'
+                    ? 'bg-indigo-600 text-white font-bold shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                SmartFix
+              </button>
+            </div>
+
+            {/* Ollama Status Badge */}
+            {health?.ollama?.online ? (
+              <div className="flex items-center gap-2 font-mono text-xs text-emerald-300 bg-emerald-950/60 border border-emerald-700/60 px-3 py-1.5 rounded-full shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                Ollama: Live ({health.ollama.active_model})
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 font-mono text-xs text-amber-300 bg-amber-950/40 border border-amber-800/60 px-3 py-1.5 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                Ollama: Simulated Fallback
+              </div>
+            )}
+
+            {/* Target Entities Count */}
+            <div className="flex items-center gap-2 font-mono text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-900/60 px-3 py-1.5 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+              {health?.entities_count ? `${health.entities_count.toLocaleString()} entities` : ''}
+              {health?.graph_nodes ? ` • ${health.graph_nodes.toLocaleString()} nodes` : ''}
+            </div>
           </div>
         </div>
       </header>

@@ -61,23 +61,32 @@ class DependencyGraphBuilder:
             if etype in ["function", "endpoint"] and entity.get("calls"):
                 for called_name in entity["calls"]:
                     if called_name in self.name_to_entities:
-                        for target_id in self.name_to_entities[called_name]:
-                            if target_id != eid:
-                                self.graph.add_edge(eid, target_id, relation="CALLS")
+                        candidates = [t for t in self.name_to_entities[called_name] if t != eid]
+                        same_file = [t for t in candidates if self.entities[t].get("file_path") == entity.get("file_path")]
+                        for target_id in (same_file if same_file else candidates[:3]):
+                            self.graph.add_edge(eid, target_id, relation="CALLS")
 
             # USES_VARIABLE & ATTRIBUTE_ACCESS
             if etype in ["function", "endpoint"]:
                 for var_name in entity.get("variables_used", []):
                     if var_name in self.name_to_entities:
-                        for target_id in self.name_to_entities[var_name]:
-                            if self.entities[target_id]["type"] == "variable" and target_id != eid:
-                                self.graph.add_edge(eid, target_id, relation="USES_VARIABLE")
+                        candidates = [
+                            t for t in self.name_to_entities[var_name]
+                            if self.entities[t]["type"] == "variable" and t != eid
+                        ]
+                        same_file = [t for t in candidates if self.entities[t].get("file_path") == entity.get("file_path")]
+                        for target_id in (same_file if same_file else candidates[:2]):
+                            self.graph.add_edge(eid, target_id, relation="USES_VARIABLE")
 
                 for attr_name in entity.get("attributes_used", []):
                     if attr_name in self.name_to_entities:
-                        for target_id in self.name_to_entities[attr_name]:
-                            if self.entities[target_id]["type"] == "attribute" and target_id != eid:
-                                self.graph.add_edge(eid, target_id, relation="ATTRIBUTE_ACCESS")
+                        candidates = [
+                            t for t in self.name_to_entities[attr_name]
+                            if self.entities[t]["type"] == "attribute" and t != eid
+                        ]
+                        same_file = [t for t in candidates if self.entities[t].get("file_path") == entity.get("file_path")]
+                        for target_id in (same_file if same_file else candidates[:2]):
+                            self.graph.add_edge(eid, target_id, relation="ATTRIBUTE_ACCESS")
 
         # HTTP_CALLS cross-service connections for SmartFix Microservices
         self._add_smartfix_http_edges()

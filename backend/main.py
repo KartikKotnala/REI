@@ -9,8 +9,8 @@ from typing import Dict, Any, List, Optional
 import time
 from pydantic import BaseModel
 
-from backend.parser.repo_parser import parse_smartfix_repository
-from backend.graph.dependency_graph import build_smartfix_dependency_graph
+from backend.parser.repo_parser import parse_smartfix_repository, parse_git_repository
+from backend.graph.dependency_graph import build_smartfix_dependency_graph, DependencyGraphBuilder
 from backend.vector_db.knowledge_base import build_smartfix_vector_kb
 from backend.architectures.contracts import (
     StaticRAGRequest,
@@ -20,6 +20,8 @@ from backend.architectures.contracts import (
 from backend.architectures.simulator import REIArchitectureSimulator
 from backend.evaluation.benchmark_dataset import get_benchmark_scenarios, get_benchmark_metadata
 from backend.evaluation.eval_metrics import evaluate_architecture_performance, compute_prediction_quality
+from backend.evaluation.comprehensive_eval import run_comprehensive_evaluation
+from backend.llm.ollama_client import check_ollama_status
 
 app = FastAPI(
     title="Repository Evolution Intelligence (REI) API",
@@ -36,13 +38,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize in-memory engines
-print("Initializing SmartFix Parser, Knowledge Graph, and Vector Database...")
-parser_data_cache = parse_smartfix_repository()
-graph_json_cache = build_smartfix_dependency_graph()
-vector_kb_cache = build_smartfix_vector_kb()
-simulator = REIArchitectureSimulator()
-print("All backend components initialized successfully!")
+FLASK_GIT_URL = "https://github.com/pallets/flask"
+current_target = "pallets/flask"
+parser_data_cache: Dict[str, Any] = {}
+graph_json_cache: Dict[str, Any] = {}
+vector_kb_cache: Any = None
+simulator: Any = None
+comprehensive_eval_cache: Any = None
+
+
+def load_repository(target: str = "pallets/flask"):
+    global parser_data_cache, graph_json_cache, vector_kb_cache, simulator, current_target, comprehensive_eval_cache
+    comprehensive_eval_cache = None
+    print(f"Loading target repository: {target}...")
+    if "flask" in target.lower():
+        parser_data_cache = parse_git_repository(git_url=FLASK_GIT_URL)
+        current_target = "pallets/flask"
+    else:
+        parser_data_cache = parse_smartfix_repository()
+        current_target = "SmartFix"
+
+    graph_builder = DependencyGraphBuilder(parser_data_cache)
+    graph_builder.build_graph()
+    graph_json_cache = graph_builder.to_json()
+    vector_kb_cache = build_smartfix_vector_kb(parser_data_cache)
+    simulator = REIArchitectureSimulator(parser_data=parser_data_cache)
+    print(f"Target repository '{current_target}' initialized! ({parser_data_cache['total_entities']} entities, {graph_json_cache['total_nodes']} nodes, {graph_json_cache['total_edges']} edges)")
+
+
+# Initialize with pallets/flask by default
+load_repository("pallets/flask")
 
 
 class VectorSearchRequest(BaseModel):
@@ -50,13 +75,20 @@ class VectorSearchRequest(BaseModel):
     top_k: int = 5
 
 
+class TargetRepoRequest(BaseModel):
+    target: str = "pallets/flask"
+
+
 @app.get("/api/health")
 def health_check():
     benchmark_meta = get_benchmark_metadata()
+    ollama_info = check_ollama_status()
     return {
         "status": "online",
         "system": "Repository Evolution Intelligence (REI)",
-        "target_repo": parser_data_cache.get("repo_name", "REI"),
+        "target_repo": current_target,
+        "repo_name": parser_data_cache.get("repo_name", "flask"),
+        "git_url": FLASK_GIT_URL if "flask" in current_target.lower() else "",
         "benchmark_version": benchmark_meta["version"],
         "benchmark_testbed": benchmark_meta["testbed"],
         "git_branch": parser_data_cache.get("git_branch", ""),
@@ -64,7 +96,26 @@ def health_check():
         "entities_count": parser_data_cache["total_entities"],
         "graph_nodes": graph_json_cache["total_nodes"],
         "graph_edges": graph_json_cache["total_edges"],
+        "ollama": ollama_info,
     }
+
+
+@app.post("/api/repository/target")
+def switch_target_repository(req: TargetRepoRequest):
+    load_repository(req.target)
+    return {
+        "status": "success",
+        "target": current_target,
+        "repo_name": parser_data_cache.get("repo_name"),
+        "entities_count": parser_data_cache["total_entities"],
+        "graph_nodes": graph_json_cache["total_nodes"],
+        "graph_edges": graph_json_cache["total_edges"],
+    }
+
+
+@app.get("/api/llm/status")
+def get_llm_status():
+    return check_ollama_status()
 
 
 @app.get("/api/parser/entities")
@@ -150,7 +201,8 @@ def run_benchmark_evaluation():
         static_res = simulator.run_static_rag(
             StaticRAGRequest(
                 change_input={"target_symbol": s["target_symbol"], "file_path": s["file_path"], "diff_snippet": s["diff_snippet"]}
-            )
+            ),
+            enable_live_llm=False,
         )
         pred_static = [p.entity_id for p in static_res.predicted_impacts]
         static_eval_data.append({"predicted": pred_static, "ground_truth": s["ground_truth_impacted_entities"]})
@@ -159,7 +211,8 @@ def run_benchmark_evaluation():
         hybrid_res = simulator.run_hybrid_intelligent_analysis(
             HybridAnalysisRequest(
                 change_input={"target_symbol": s["target_symbol"], "file_path": s["file_path"], "diff_snippet": s["diff_snippet"]}
-            )
+            ),
+            enable_live_llm=False,
         )
         pred_hybrid = [p.entity_id for p in hybrid_res.ranked_impacts]
         hybrid_eval_data.append({"predicted": pred_hybrid, "ground_truth": s["ground_truth_impacted_entities"]})
@@ -181,6 +234,19 @@ def run_benchmark_evaluation():
         "static_dependency_rag": static_metrics,
         "hybrid_intelligent_analysis": hybrid_metrics,
     }
+
+
+@app.get("/api/eval/comprehensive")
+def get_comprehensive_evaluation(force_refresh: bool = False):
+    global comprehensive_eval_cache
+    if comprehensive_eval_cache is None or force_refresh:
+        comprehensive_eval_cache = run_comprehensive_evaluation(
+            parser_data=parser_data_cache,
+            graph_data=graph_json_cache,
+            vector_kb=vector_kb_cache,
+            simulator=simulator,
+        )
+    return comprehensive_eval_cache
 
 
 if __name__ == "__main__":

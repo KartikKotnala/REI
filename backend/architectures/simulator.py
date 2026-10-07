@@ -4,7 +4,7 @@ Executes reproducible impact analysis data flows over the SmartFix dependency gr
 """
 
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import networkx as nx
 from backend.parser.repo_parser import parse_smartfix_repository
 from backend.graph.dependency_graph import DependencyGraphBuilder
@@ -19,16 +19,21 @@ from backend.architectures.contracts import (
     AgentReasoningOutput,
     CANDIDATE_MODELS_MATRIX,
 )
+from backend.llm.ollama_client import (
+    check_ollama_status,
+    run_ollama_risk_summarization,
+    run_ollama_agent_reasoning,
+)
 
 
 class REIArchitectureSimulator:
-    def __init__(self):
-        self.parser_data = parse_smartfix_repository()
+    def __init__(self, parser_data: Optional[Dict[str, Any]] = None):
+        self.parser_data = parser_data if parser_data is not None else parse_smartfix_repository()
         self.graph_builder = DependencyGraphBuilder(self.parser_data)
         self.nx_graph = self.graph_builder.build_graph()
         self.vector_kb = VectorKnowledgeBase(self.parser_data)
 
-    def run_static_rag(self, req: StaticRAGRequest) -> StaticRAGResponse:
+    def run_static_rag(self, req: StaticRAGRequest, enable_live_llm: bool = True) -> StaticRAGResponse:
         start_time = time.time()
         target = req.change_input.target_symbol
 
@@ -107,11 +112,38 @@ class REIArchitectureSimulator:
         ranked_impacts = sorted(combined.values(), key=lambda x: x.impact_score, reverse=True)
         latency_ms = (time.time() - start_time) * 1000
 
+        # Stage 4: Sub-13B LLM Risk Summarization
+        ollama_status = check_ollama_status()
+        is_live = False
+        llm_model = CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"]
+        llm_summary = None
+
+        if enable_live_llm and ollama_status.get("online") and ollama_status.get("active_model"):
+            active_m = ollama_status["active_model"]
+            candidate_names = [c.name for c in ranked_impacts[:5]]
+            ollama_res = run_ollama_risk_summarization(
+                target_symbol=target,
+                diff_snippet=req.change_input.diff_snippet,
+                impacted_candidate_names=candidate_names,
+                model=active_m,
+            )
+            if ollama_res:
+                is_live = True
+                llm_model = f"{active_m} (Ollama Live)"
+                llm_summary = ollama_res.get("summary")
+                if ranked_impacts and ollama_res.get("severity") in ["HIGH", "CRITICAL"]:
+                    ranked_impacts[0].severity = "HIGH"
+
         pipeline_stages = [
             {"stage": "1. AST Graph Traversal", "input": target_node, "output_count": len(graph_impacts)},
             {"stage": "2. Vector Code Retrieval", "query": query, "output_count": len(vector_results)},
             {"stage": "3. Score Fusion", "alpha": req.fusion_alpha, "output_count": len(ranked_impacts)},
-            {"stage": "4. Sub-13B LLM Risk Summarization", "model": CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"], "status": "COMPLETED"},
+            {
+                "stage": "4. Sub-13B LLM Risk Summarization",
+                "model": llm_model,
+                "status": "COMPLETED (Live Inference)" if is_live else "COMPLETED (Simulated)",
+                "live_inference": is_live,
+            },
         ]
 
         return StaticRAGResponse(
@@ -121,16 +153,71 @@ class REIArchitectureSimulator:
             vector_retrieved_chunks_count=len(vector_results),
             execution_latency_ms=round(latency_ms, 2),
             pipeline_stages=pipeline_stages,
+            is_live_inference=is_live,
+            llm_summary=llm_summary,
         )
 
-    def run_hybrid_intelligent_analysis(self, req: HybridAnalysisRequest) -> HybridAnalysisResponse:
+    def run_hybrid_intelligent_analysis(self, req: HybridAnalysisRequest, enable_live_llm: bool = True) -> HybridAnalysisResponse:
         start_time = time.time()
         target = req.change_input.target_symbol
 
         # Candidate Re-ranking & Proof Chains
-        static_resp = self.run_static_rag(StaticRAGRequest(change_input=req.change_input))
+        static_resp = self.run_static_rag(StaticRAGRequest(change_input=req.change_input), enable_live_llm=enable_live_llm)
         candidates = static_resp.predicted_impacts
         ranked_impacts = candidates
+
+        # Check if Ollama is available for live agent reasoning
+        ollama_status = check_ollama_status()
+        is_live = False
+        active_m = ollama_status.get("active_model")
+
+        call_reasoning = "Traced function signatures and call-graph dependencies from modified symbol."
+        dataflow_reasoning = "Analyzed variable and attribute mutation side-effects across retrieved candidate scope."
+        rest_reasoning = "Traced architectural boundaries and exposed system interfaces."
+        call_model_label = CANDIDATE_MODELS_MATRIX["ast_parsing"]["primary_model"]
+        dataflow_model_label = CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"]
+        rest_model_label = CANDIDATE_MODELS_MATRIX["graph_translation"]["primary_model"]
+
+        if enable_live_llm and ollama_status.get("online") and active_m:
+            candidate_ids = [c.entity_id for c in candidates[:4]]
+            live_call = run_ollama_agent_reasoning(
+                agent_name="Call-Chain Impact Agent",
+                agent_role="Function Signature & Caller Analysis",
+                target_symbol=target,
+                diff_snippet=req.change_input.diff_snippet,
+                candidate_entities=candidate_ids,
+                model=active_m,
+            )
+            if live_call:
+                call_reasoning = live_call
+                call_model_label = f"{active_m} (Ollama Live)"
+                is_live = True
+
+            live_dataflow = run_ollama_agent_reasoning(
+                agent_name="Dataflow & State Agent",
+                agent_role="Variable & Attribute Mutation Analysis",
+                target_symbol=target,
+                diff_snippet=req.change_input.diff_snippet,
+                candidate_entities=candidate_ids,
+                model=active_m,
+            )
+            if live_dataflow:
+                dataflow_reasoning = live_dataflow
+                dataflow_model_label = f"{active_m} (Ollama Live)"
+                is_live = True
+
+            live_rest = run_ollama_agent_reasoning(
+                agent_name="System Boundary Agent",
+                agent_role="API Endpoint & Inter-Module Communication",
+                target_symbol=target,
+                diff_snippet=req.change_input.diff_snippet,
+                candidate_entities=candidate_ids,
+                model=active_m,
+            )
+            if live_rest:
+                rest_reasoning = live_rest
+                rest_model_label = f"{active_m} (Ollama Live)"
+                is_live = True
 
         # Build dynamic agent reasoning outputs based on retrieved candidates
         call_impacts = [
@@ -143,10 +230,10 @@ class REIArchitectureSimulator:
         call_agent = AgentReasoningOutput(
             agent_name="Call-Chain Impact Agent",
             agent_role="Function Signature & Caller Analysis",
-            specialized_llm_used=CANDIDATE_MODELS_MATRIX["ast_parsing"]["primary_model"],
+            specialized_llm_used=call_model_label,
             discovered_impacts=call_impacts,
             confidence_score=0.92,
-            reasoning_summary="Traced function signatures and call-graph dependencies from modified symbol."
+            reasoning_summary=call_reasoning,
         )
 
         dataflow_impacts = [
@@ -159,10 +246,10 @@ class REIArchitectureSimulator:
         dataflow_agent = AgentReasoningOutput(
             agent_name="Dataflow & State Agent",
             agent_role="Variable & Attribute Mutation Analysis",
-            specialized_llm_used=CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"],
+            specialized_llm_used=dataflow_model_label,
             discovered_impacts=dataflow_impacts,
             confidence_score=0.88,
-            reasoning_summary="Analyzed variable and attribute mutation side-effects across retrieved candidate scope."
+            reasoning_summary=dataflow_reasoning,
         )
 
         boundary_candidates = [c for c in candidates if "main" in c.file_path or "api" in c.file_path or c.type == "endpoint"]
@@ -177,10 +264,10 @@ class REIArchitectureSimulator:
         rest_agent = AgentReasoningOutput(
             agent_name="System Boundary Agent",
             agent_role="API Endpoint & Inter-Module Communication",
-            specialized_llm_used=CANDIDATE_MODELS_MATRIX["graph_translation"]["primary_model"],
+            specialized_llm_used=rest_model_label,
             discovered_impacts=boundary_impacts,
             confidence_score=0.95,
-            reasoning_summary="Traced architectural boundaries and exposed system interfaces."
+            reasoning_summary=rest_reasoning,
         )
 
         agent_outputs = [call_agent, dataflow_agent, rest_agent]
@@ -189,16 +276,20 @@ class REIArchitectureSimulator:
             f"[Step 1: Intent Classification] Classified change to '{target}' as API_SIGNATURE_MODIFICATION.",
             f"[Step 2: Multi-Hop Graph RAG] Retrieved {len(candidates)} call-graph and vector candidate nodes.",
             f"[Step 3: Multi-Agent Synthesis] Call-Chain Agent & Dataflow Agent corroborated critical impact nodes.",
-            f"[Step 4: Sub-13B Re-ranker ({CANDIDATE_MODELS_MATRIX['consensus_reranking']['primary_model']})] Re-ranked candidates with 94.2% consensus score."
+            (
+                f"[Step 4: Live Ollama Inference ({active_m})] Multi-agent analysis corroborated live via local Ollama."
+                if is_live
+                else f"[Step 4: Sub-13B Re-ranker ({CANDIDATE_MODELS_MATRIX['consensus_reranking']['primary_model']})] Re-ranked candidates with 94.2% consensus score."
+            )
         ]
 
         latency_ms = (time.time() - start_time) * 1000
 
         models_used = [
-            CANDIDATE_MODELS_MATRIX["ast_parsing"]["primary_model"],
-            CANDIDATE_MODELS_MATRIX["graph_translation"]["primary_model"],
+            call_model_label,
+            dataflow_model_label,
+            rest_model_label,
             CANDIDATE_MODELS_MATRIX["semantic_embedding"]["primary_model"],
-            CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"],
             CANDIDATE_MODELS_MATRIX["consensus_reranking"]["primary_model"],
         ]
 
@@ -211,6 +302,7 @@ class REIArchitectureSimulator:
             proof_chain=proof_chain,
             execution_latency_ms=round(latency_ms, 2),
             models_orchestrated=models_used,
+            is_live_inference=is_live,
         )
 
 

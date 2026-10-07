@@ -1,43 +1,43 @@
 import React, { useState } from 'react';
-import { Play, Activity, AlertTriangle, CheckCircle, ShieldAlert, Cpu, Layers, ListOrdered } from 'lucide-react';
+import { Play, Activity, AlertTriangle, CheckCircle, ShieldAlert, Cpu, Layers, ListOrdered, Sparkles } from 'lucide-react';
 
 export default function ImpactSimulatorView() {
   const PRESET_SCENARIOS = [
     {
-      name: '1. Orchestrator.parse',
+      name: 'Flask.run (app.py)',
+      symbol: 'src.flask.a.Flask.run',
+      file: 'src/flask/app.py',
+      diff: '- def run(self, host=None, port=None, debug=None, load_dotenv=True, **options):\n+ def run(self, host=None, port=None, debug=None, load_dotenv=True, ssl_context=None, **options):',
+    },
+    {
+      name: 'Blueprint.__init__',
+      symbol: 'src.flask.blueprints.Blueprint',
+      file: 'src/flask/blueprints.py',
+      diff: '- def __init__(self, name: str, import_name: str, static_folder: Optional[str] = None):\n+ def __init__(self, name: str, import_name: str, static_folder: Optional[str] = None, strict_slashes: bool = True):',
+    },
+    {
+      name: 'request (globals.py)',
+      symbol: 'src.flask.globals.request',
+      file: 'src/flask/globals.py',
+      diff: '- request: Request = LocalProxy(partial(_cv_request.get))\n+ request: Request = LocalProxy(partial(_cv_request.get, default=None))',
+    },
+    {
+      name: 'jsonify (json/__init__.py)',
+      symbol: 'src.flask.json.__init__.jsonify',
+      file: 'src/flask/json/__init__.py',
+      diff: '- def jsonify(*args: Any, **kwargs: Any) -> Response:\n+ def jsonify(*args: Any, indent: Optional[int] = 2, **kwargs: Any) -> Response:',
+    },
+    {
+      name: 'SmartFix: Orchestrator.parse',
       symbol: 'RepositoryOrchestrator.parse',
       file: 'backend/parser/repo_orchestrator.py',
       diff: '- def parse(self, path_or_url: Optional[str] = None):\n+ def parse(self, path_or_url: Optional[str] = None, enable_caching: bool = True):',
     },
-    {
-      name: '2. VectorKB.search',
-      symbol: 'VectorKnowledgeBase.search',
-      file: 'backend/vector_db/knowledge_base.py',
-      diff: '- def search(self, query: str, top_k: int = 5):\n+ def search(self, query: str, top_k: int = 5, min_score: float = 0.05):',
-    },
-    {
-      name: '3. GraphBuilder.build',
-      symbol: 'DependencyGraphBuilder.build_graph',
-      file: 'backend/graph/dependency_graph.py',
-      diff: '- def build_graph(self) -> nx.DiGraph:\n+ def build_graph(self, include_transitive: bool = False) -> nx.DiGraph:',
-    },
-    {
-      name: '4. ASTExtractor.extract',
-      symbol: 'ASTEntityExtractor.extract',
-      file: 'backend/parser/ast_extractor.py',
-      diff: '- def extract(self) -> List[Dict[str, Any]]:\n+ def extract(self, strict_mode: bool = False) -> List[Dict[str, Any]]:',
-    },
-    {
-      name: '5. Simulator.static_rag',
-      symbol: 'REIArchitectureSimulator.run_static_rag',
-      file: 'backend/architectures/simulator.py',
-      diff: '- def run_static_rag(self, req: StaticRAGRequest):\n+ def run_static_rag(self, req: StaticRAGRequest, timeout_ms: int = 5000):',
-    },
   ];
 
-  const [targetSymbol, setTargetSymbol] = useState('RepositoryOrchestrator.parse');
-  const [filePath, setFilePath] = useState('backend/parser/repo_orchestrator.py');
-  const [diffSnippet, setDiffSnippet] = useState('- def parse(self, path_or_url: Optional[str] = None):\n+ def parse(self, path_or_url: Optional[str] = None, enable_caching: bool = True):');
+  const [targetSymbol, setTargetSymbol] = useState('src.flask.a.Flask.run');
+  const [filePath, setFilePath] = useState('src/flask/app.py');
+  const [diffSnippet, setDiffSnippet] = useState('- def run(self, host=None, port=None, debug=None, load_dotenv=True, **options):\n+ def run(self, host=None, port=None, debug=None, load_dotenv=True, ssl_context=None, **options):');
   const [activeTab, setActiveTab] = useState('HYBRID');
 
   const [staticResult, setStaticResult] = useState(null);
@@ -200,6 +200,14 @@ export default function ImpactSimulatorView() {
                 </div>
               </div>
 
+              {/* Hybrid Live Badge */}
+              {hybridResult.is_live_inference && (
+                <div className="flex items-center gap-2 p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-xs font-mono text-emerald-300">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Live Local Ollama Active: Multi-agent reasoning corroborated via live sub-13B model inference.</span>
+                </div>
+              )}
+
               {/* Multi-Agent Reasoning Step Outputs */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">Multi-Agent Sub-Task Outputs (&le; 13B Models)</h3>
@@ -251,6 +259,23 @@ export default function ImpactSimulatorView() {
                   <div className="text-2xl font-bold text-emerald-400 mt-1">{staticResult.execution_latency_ms} ms</div>
                 </div>
               </div>
+
+              {/* Live Ollama Risk Summary */}
+              {staticResult.llm_summary && (
+                <div className="bg-slate-900 border border-emerald-900/50 rounded-xl p-5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                      <Sparkles className="w-4 h-4" /> Live Sub-13B LLM Risk Assessment
+                    </h3>
+                    <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono">
+                      Ollama Live
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed font-mono bg-slate-950 p-3 rounded-lg border border-slate-800">
+                    {staticResult.llm_summary}
+                  </p>
+                </div>
+              )}
 
               {/* Pipeline Stages */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-3">
