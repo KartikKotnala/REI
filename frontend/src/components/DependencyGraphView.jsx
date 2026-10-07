@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { GitGraph, Search, Filter, Code, Box, Link, Tag } from 'lucide-react';
+import { GitGraph, Search, Filter, Code, Box, Link, Tag, Network, ListFilter } from 'lucide-react';
+import DependencyCanvas from './DependencyCanvas';
 
 export default function DependencyGraphView() {
   const [graphData, setGraphData] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('ALL');
   const [selectedEntity, setSelectedEntity] = useState(null);
+  const [viewMode, setViewMode] = useState('GRAPH'); // 'GRAPH' | 'LIST'
 
   useEffect(() => {
     fetch('/api/graph/dependency')
@@ -57,7 +59,7 @@ export default function DependencyGraphView() {
       </div>
 
       {/* Controls */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
         <div className="relative md:col-span-2">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
@@ -83,47 +85,46 @@ export default function DependencyGraphView() {
             <option value="module">Module</option>
           </select>
         </div>
+        <div className="flex bg-slate-900 border border-slate-800 rounded-lg p-1">
+          <button
+            onClick={() => setViewMode('GRAPH')}
+            className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded flex items-center justify-center gap-1.5 transition ${
+              viewMode === 'GRAPH'
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5" /> Graph Canvas
+          </button>
+          <button
+            onClick={() => setViewMode('LIST')}
+            className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded flex items-center justify-center gap-1.5 transition ${
+              viewMode === 'LIST'
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ListFilter className="w-3.5 h-3.5" /> List Inspector
+          </button>
+        </div>
       </div>
 
-      {/* Main Split Explorer */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Entity List */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 max-h-[600px] overflow-y-auto space-y-2">
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">
-            Matching Entities ({filteredNodes.length})
-          </div>
-          {filteredNodes.slice(0, 80).map((node) => (
-            <div
-              key={node.id}
-              onClick={() => setSelectedEntity(node)}
-              className={`p-3 rounded-lg border cursor-pointer transition ${
-                selectedEntity && selectedEntity.id === node.id
-                  ? 'bg-indigo-950/60 border-indigo-500 text-white'
-                  : 'bg-slate-950/40 border-slate-800 text-slate-300 hover:border-slate-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm font-mono truncate">{node.name}</span>
-                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
-                  node.type === 'function' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' :
-                  node.type === 'class' ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' :
-                  node.type === 'variable' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-                  node.type === 'attribute' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' :
-                  node.type === 'endpoint' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                  'bg-slate-500/10 text-slate-400 border-slate-500/30'
-                }`}>
-                  {node.type}
-                </span>
-              </div>
-              <div className="text-xs text-slate-500 font-mono truncate mt-1">{node.file_path}</div>
-            </div>
-          ))}
-        </div>
+      {/* Main View Area */}
+      {viewMode === 'GRAPH' ? (
+        <div className="space-y-6">
+          {/* Obsidian-Style HTML5 Canvas + d3-force Simulation */}
+          <DependencyCanvas
+            nodes={graphData.nodes}
+            links={graphData.links}
+            selectedEntity={selectedEntity}
+            onSelectEntity={(node) => setSelectedEntity(node)}
+            searchTerm={searchTerm}
+            selectedType={selectedType}
+          />
 
-        {/* Selected Entity & Graph Inspector */}
-        <div className="lg:col-span-2 space-y-6">
-          {selectedEntity ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-6">
+          {/* Selected Entity Details Panel */}
+          {selectedEntity && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
               <div>
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-bold text-white font-mono">{selectedEntity.name}</h3>
@@ -153,11 +154,23 @@ export default function DependencyGraphView() {
                     <div className="text-xs text-slate-500 italic">No incoming dependency edges</div>
                   ) : (
                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {connections.incoming.map((link, idx) => (
-                        <div key={idx} className="text-xs font-mono bg-slate-900 p-2 rounded border border-slate-800">
-                          <span className="text-blue-400">{link.relation}</span> from <span className="text-slate-200">{link.source.split('.').pop()}</span>
-                        </div>
-                      ))}
+                      {connections.incoming.map((link, idx) => {
+                        const sid = typeof link.source === 'object' ? link.source.id : link.source;
+                        const sourceNode = graphData.nodes.find(n => n.id === sid);
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => sourceNode && setSelectedEntity(sourceNode)}
+                            className="text-xs font-mono bg-slate-900 p-2 rounded border border-slate-800 hover:border-blue-500/50 cursor-pointer transition flex items-center justify-between group"
+                            title="Click to inspect this entity"
+                          >
+                            <div>
+                              <span className="text-blue-400">{link.relation}</span> from <span className="text-slate-200 group-hover:text-blue-300">{sid.split('.').pop()}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 group-hover:text-blue-400">&rarr;</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -171,23 +184,135 @@ export default function DependencyGraphView() {
                     <div className="text-xs text-slate-500 italic">No outgoing dependency edges</div>
                   ) : (
                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {connections.outgoing.map((link, idx) => (
-                        <div key={idx} className="text-xs font-mono bg-slate-900 p-2 rounded border border-slate-800">
-                          <span className="text-emerald-400">{link.relation}</span> to <span className="text-slate-200">{link.target.split('.').pop()}</span>
-                        </div>
-                      ))}
+                      {connections.outgoing.map((link, idx) => {
+                        const tid = typeof link.target === 'object' ? link.target.id : link.target;
+                        const targetNode = graphData.nodes.find(n => n.id === tid);
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => targetNode && setSelectedEntity(targetNode)}
+                            className="text-xs font-mono bg-slate-900 p-2 rounded border border-slate-800 hover:border-emerald-500/50 cursor-pointer transition flex items-center justify-between group"
+                            title="Click to inspect this entity"
+                          >
+                            <div>
+                              <span className="text-emerald-400">{link.relation}</span> to <span className="text-slate-200 group-hover:text-emerald-300">{tid.split('.').pop()}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 group-hover:text-emerald-400">&rarr;</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-500">
-              Select an entity from the list to inspect its graph connections.
-            </div>
           )}
         </div>
-      </div>
+      ) : (
+        /* Original 3-Column Master-Detail List Inspector */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Entity List */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 max-h-[600px] overflow-y-auto space-y-2">
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">
+              Matching Entities ({filteredNodes.length})
+            </div>
+            {filteredNodes.slice(0, 80).map((node) => (
+              <div
+                key={node.id}
+                onClick={() => setSelectedEntity(node)}
+                className={`p-3 rounded-lg border cursor-pointer transition ${
+                  selectedEntity && selectedEntity.id === node.id
+                    ? 'bg-indigo-950/60 border-indigo-500 text-white'
+                    : 'bg-slate-950/40 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-sm font-mono truncate">{node.name}</span>
+                  <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                    node.type === 'function' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' :
+                    node.type === 'class' ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' :
+                    node.type === 'variable' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
+                    node.type === 'attribute' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' :
+                    node.type === 'endpoint' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                    'bg-slate-500/10 text-slate-400 border-slate-500/30'
+                  }`}>
+                    {node.type}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 font-mono truncate mt-1">{node.file_path}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Selected Entity & Graph Inspector */}
+          <div className="lg:col-span-2 space-y-6">
+            {selectedEntity ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-6">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-bold text-white font-mono">{selectedEntity.name}</h3>
+                    <span className="text-xs px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded-full font-mono uppercase">
+                      {selectedEntity.type}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono mt-1">{selectedEntity.id}</div>
+                  <div className="text-xs text-slate-500 font-mono mt-0.5">File: {selectedEntity.file_path}</div>
+                </div>
+
+                {/* Signature */}
+                {selectedEntity.signature && (
+                  <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-xs text-emerald-300">
+                    {selectedEntity.signature}
+                  </div>
+                )}
+
+                {/* Graph Edges */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Incoming Edges (Dependents / Callers) */}
+                  <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-800 space-y-3">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Link className="w-3.5 h-3.5 text-blue-400" /> Incoming Dependencies ({connections.incoming.length})
+                    </h4>
+                    {connections.incoming.length === 0 ? (
+                      <div className="text-xs text-slate-500 italic">No incoming dependency edges</div>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {connections.incoming.map((link, idx) => (
+                          <div key={idx} className="text-xs font-mono bg-slate-900 p-2 rounded border border-slate-800">
+                            <span className="text-blue-400">{link.relation}</span> from <span className="text-slate-200">{link.source.split('.').pop()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Outgoing Edges (Callees / Target Dependencies) */}
+                  <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-800 space-y-3">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Link className="w-3.5 h-3.5 text-emerald-400" /> Outgoing Dependencies ({connections.outgoing.length})
+                    </h4>
+                    {connections.outgoing.length === 0 ? (
+                      <div className="text-xs text-slate-500 italic">No outgoing dependency edges</div>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {connections.outgoing.map((link, idx) => (
+                          <div key={idx} className="text-xs font-mono bg-slate-900 p-2 rounded border border-slate-800">
+                            <span className="text-emerald-400">{link.relation}</span> to <span className="text-slate-200">{link.target.split('.').pop()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-500">
+                Select an entity from the list to inspect its graph connections.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
