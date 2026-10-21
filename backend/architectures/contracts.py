@@ -100,6 +100,8 @@ class StaticRAGResponse(BaseModel):
     execution_latency_ms: float
     selected_llm: str = "DeepSeek-Coder-6.7B-Instruct (<= 13B)"
     pipeline_stages: List[Dict[str, Any]] = Field(default_factory=list)
+    is_live_inference: bool = False
+    llm_summary: Optional[str] = None
 
 
 # ==========================================
@@ -132,3 +134,4 @@ class HybridAnalysisResponse(BaseModel):
     proof_chain: List[str]
     execution_latency_ms: float
     models_orchestrated: List[str]
+    is_live_inference: bool = False
