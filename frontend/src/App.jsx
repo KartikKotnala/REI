@@ -32,10 +32,16 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 font-mono text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-900/60 px-3 py-1.5 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Target Repo: SmartFix ({health?.benchmark_version || 'v1.0.0'})
-            {health?.entities_count ? ` • ${health.entities_count} entities` : ''}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 font-mono text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-900/60 px-3 py-1.5 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Target Repo: SmartFix ({health?.benchmark_version || 'v1.0.0'})
+              {health?.entities_count ? ` • ${health.entities_count} entities` : ''}
+            </div>
+            <div className={`flex items-center gap-2 font-mono text-xs px-3 py-1.5 rounded-full border ${health?.ollama_available ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-amber-950/40 border-amber-800 text-amber-300'}`}>
+              <span className={`w-2 h-2 rounded-full ${health?.ollama_available ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              LLM: {health?.ollama_available ? health.ollama_active_model : 'Heuristic Simulation'}
+            </div>
           </div>
         </div>
       </header>

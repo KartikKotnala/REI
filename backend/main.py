@@ -52,11 +52,16 @@ class VectorSearchRequest(BaseModel):
 
 @app.get("/api/health")
 def health_check():
+    from backend.architectures.ollama_client import ollama_client
     benchmark_meta = get_benchmark_metadata()
+    ollama_ok = ollama_client.is_available()
+    active_model = ollama_client.resolve_best_model() if ollama_ok else "None (Heuristic Fallback)"
     return {
         "status": "online",
         "system": "Repository Evolution Intelligence (REI)",
         "target_repo": parser_data_cache.get("repo_name", "REI"),
+        "ollama_available": ollama_ok,
+        "ollama_active_model": active_model,
         "benchmark_version": benchmark_meta["version"],
         "benchmark_testbed": benchmark_meta["testbed"],
         "git_branch": parser_data_cache.get("git_branch", ""),
