@@ -48,7 +48,7 @@ export default function DependencyGraphView() {
             <GitGraph className="text-indigo-400" /> SmartFix Dependency Knowledge Graph
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            AST entity graph extracted from SmartFix Python repository ({graphData.total_nodes} entities, {graphData.total_edges} dependencies).
+            Localized 1-Hop, 2-Hop, and 3-Hop dependency subgraphs centered on selected entities.
           </p>
         </div>
         <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg font-mono text-xs text-indigo-300">
@@ -316,3 +316,4 @@ export default function DependencyGraphView() {
     </div>
   );
 }
+

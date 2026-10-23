@@ -29,8 +29,8 @@ export default function DependencyCanvas({
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
-  // View state: 'FULL' | 'LOCAL_1' | 'LOCAL_2'
-  const [focusMode, setFocusMode] = useState('FULL');
+  // Hop Horizon Mode: 'HOP_1' | 'HOP_2' | 'HOP_3' (Strictly localized subgraphs; no whole graph)
+  const [focusMode, setFocusMode] = useState('HOP_1');
   const [hoveredNode, setHoveredNode] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
@@ -42,7 +42,7 @@ export default function DependencyCanvas({
   const panStartRef = useRef({ x: 0, y: 0 });
   const mousePosRef = useRef({ x: 0, y: 0 });
 
-  // Compute node degrees (number of links per node)
+  // Compute node degrees (number of links per node across entire graph)
   const degreeMap = useMemo(() => {
     const deg = new Map();
     links.forEach(l => {
@@ -54,53 +54,62 @@ export default function DependencyCanvas({
     return deg;
   }, [links]);
 
-  // Filter nodes & links based on search, type, and focusMode (Local Graph vs Full)
+  // Filter nodes & links: Localized hop subgraphs only (1-Hop, 2-Hop, 3-Hop) - No whole graph!
   const { displayNodes, displayLinks } = useMemo(() => {
-    let targetIds = new Set();
-
-    if (focusMode !== 'FULL' && selectedEntity) {
-      targetIds.add(selectedEntity.id);
-      // 1-hop neighbors
-      const hop1 = new Set();
-      links.forEach(l => {
-        const s = typeof l.source === 'object' ? l.source.id : l.source;
-        const t = typeof l.target === 'object' ? l.target.id : l.target;
-        if (s === selectedEntity.id) hop1.add(t);
-        if (t === selectedEntity.id) hop1.add(s);
-      });
-      hop1.forEach(id => targetIds.add(id));
-
-      // 2-hop neighbors if requested
-      if (focusMode === 'LOCAL_2') {
-        const hop2 = new Set();
-        links.forEach(l => {
-          const s = typeof l.source === 'object' ? l.source.id : l.source;
-          const t = typeof l.target === 'object' ? l.target.id : l.target;
-          if (hop1.has(s)) hop2.add(t);
-          if (hop1.has(t)) hop2.add(s);
-        });
-        hop2.forEach(id => targetIds.add(id));
-      }
-    } else {
-      // Full graph filtered by search & type
-      nodes.forEach(n => {
-        const matchSearch = !searchTerm ||
-          n.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          n.id.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchType = selectedType === 'ALL' || n.type === selectedType;
-        if (matchSearch && matchType) {
-          targetIds.add(n.id);
-        }
-      });
+    if (!selectedEntity || nodes.length === 0) {
+      return { displayNodes: [], displayLinks: [] };
     }
 
-    const filteredNodes = nodes
-      .filter(n => targetIds.has(n.id))
-      .map(n => {
-        const deg = degreeMap.get(n.id) || 1;
-        const radius = Math.max(5, Math.min(18, 5 + Math.sqrt(deg) * 2));
-        return { ...n, radius };
-      });
+    const maxHops = focusMode === 'HOP_3' ? 3 : focusMode === 'HOP_2' ? 2 : 1;
+
+    // Fast Adjacency Map (bidirectional traversal for caller/callee neighborhood)
+    const adj = new Map();
+    links.forEach(l => {
+      const s = typeof l.source === 'object' ? l.source.id : l.source;
+      const t = typeof l.target === 'object' ? l.target.id : l.target;
+      if (!adj.has(s)) adj.set(s, []);
+      if (!adj.has(t)) adj.set(t, []);
+      adj.get(s).push(t);
+      adj.get(t).push(s);
+    });
+
+    // BFS to find all nodes within maxHops of selectedEntity.id
+    const visitedHop = new Map(); // id -> hop distance (0 for root)
+    visitedHop.set(selectedEntity.id, 0);
+    const queue = [selectedEntity.id];
+
+    while (queue.length > 0) {
+      const currId = queue.shift();
+      const currHop = visitedHop.get(currId);
+      if (currHop >= maxHops) continue;
+
+      const neighbors = adj.get(currId) || [];
+      for (const nbrId of neighbors) {
+        if (!visitedHop.has(nbrId)) {
+          visitedHop.set(nbrId, currHop + 1);
+          queue.push(nbrId);
+        }
+      }
+    }
+
+    const nodeLookup = new Map(nodes.map(n => [n.id, n]));
+    const targetNodeIds = new Set(visitedHop.keys());
+
+    const filteredNodes = [];
+    targetNodeIds.forEach(id => {
+      const node = nodeLookup.get(id);
+      if (node) {
+        const hop = visitedHop.get(id);
+        const deg = degreeMap.get(id) || 1;
+        // Root node is prominent and larger; neighbors sized by connectivity
+        const radius = hop === 0 ? 15 : Math.max(6, Math.min(13, 6 + Math.sqrt(deg) * 1.5));
+        filteredNodes.push({
+          ...node,
+          radius,
+          hopDistance: hop
+        });
+      }
+    });
 
     const activeNodeIdSet = new Set(filteredNodes.map(n => n.id));
 
@@ -117,12 +126,20 @@ export default function DependencyCanvas({
       }));
 
     return { displayNodes: filteredNodes, displayLinks: filteredLinks };
-  }, [nodes, links, selectedEntity, focusMode, searchTerm, selectedType, degreeMap]);
+  }, [nodes, links, selectedEntity, focusMode, degreeMap]);
 
   // Keep simulation and active nodes in refs to drive requestAnimationFrame
   const simulationRef = useRef(null);
   const simNodesRef = useRef([]);
   const simLinksRef = useRef([]);
+
+  // Recenter camera when selected entity or hop horizon changes
+  useEffect(() => {
+    transformRef.current = { x: 0, y: 0, k: 1 };
+    if (simulationRef.current) {
+      simulationRef.current.alpha(0.5).restart();
+    }
+  }, [selectedEntity?.id, focusMode]);
 
   // Setup / restart d3-force simulation
   useEffect(() => {
@@ -130,15 +147,15 @@ export default function DependencyCanvas({
     const width = containerRef.current.clientWidth || 800;
     const height = containerRef.current.clientHeight || 550;
 
-    // Preserve existing positions if available so nodes do not violently reset
+    // Preserve existing positions if available so nodes do not violently jump
     const existingPos = new Map(simNodesRef.current.map(n => [n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy }]));
 
     const simNodes = displayNodes.map(n => {
       const prev = existingPos.get(n.id);
       return {
         ...n,
-        x: prev ? prev.x : width / 2 + (Math.random() - 0.5) * 200,
-        y: prev ? prev.y : height / 2 + (Math.random() - 0.5) * 200,
+        x: prev ? prev.x : width / 2 + (Math.random() - 0.5) * 160,
+        y: prev ? prev.y : height / 2 + (Math.random() - 0.5) * 160,
         vx: prev ? prev.vx : 0,
         vy: prev ? prev.vy : 0
       };
@@ -155,12 +172,17 @@ export default function DependencyCanvas({
         'link',
         forceLink(simLinks)
           .id(d => d.id)
-          .distance(focusMode === 'FULL' ? 55 : 85)
-          .strength(0.35)
+          .distance(focusMode === 'HOP_1' ? 95 : focusMode === 'HOP_2' ? 75 : 60)
+          .strength(0.4)
       )
-      .force('charge', forceManyBody().strength(focusMode === 'FULL' ? -90 : -180).distanceMax(500))
+      .force(
+        'charge',
+        forceManyBody()
+          .strength(focusMode === 'HOP_1' ? -240 : focusMode === 'HOP_2' ? -170 : -110)
+          .distanceMax(600)
+      )
       .force('center', forceCenter(width / 2, height / 2))
-      .force('collide', forceCollide().radius(d => d.radius + 6).iterations(2))
+      .force('collide', forceCollide().radius(d => d.radius + 8).iterations(2))
       .alpha(0.6)
       .alphaDecay(0.028);
 
@@ -214,6 +236,18 @@ export default function DependencyCanvas({
         }
       }
       ctx.restore();
+
+      // Empty State messaging if no nodes
+      if (simNodesRef.current.length === 0) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Select an entity from the list to explore its 1-Hop, 2-Hop, or 3-Hop dependency graph.', width / 2, height / 2);
+        ctx.restore();
+        animId = requestAnimationFrame(render);
+        return;
+      }
 
       // Apply Pan & Zoom Transform
       ctx.save();
@@ -302,8 +336,9 @@ export default function DependencyCanvas({
 
         const isHovered = currentHover && currentHover.id === n.id;
         const isSelected = currentSelected && currentSelected.id === n.id;
+        const isRootCenter = n.hopDistance === 0;
         const isNeighbor = neighborIds.has(n.id);
-        const isDimmed = activeHighlightId && !isNeighbor;
+        const isDimmed = activeHighlightId && !isNeighbor && !isRootCenter;
 
         const colorCfg = TYPE_COLORS[n.type] || TYPE_COLORS.default;
         const r = n.radius || 6;
@@ -311,6 +346,18 @@ export default function DependencyCanvas({
         ctx.save();
         if (isDimmed) {
           ctx.globalAlpha = 0.18;
+        }
+
+        // Distinct dashed halo around the Root Focus Entity
+        if (isRootCenter) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
+          ctx.strokeStyle = '#818cf8';
+          ctx.lineWidth = 2.2 / transformRef.current.k;
+          ctx.setLineDash([4, 3]);
+          ctx.stroke();
+          ctx.restore();
         }
 
         // Outer glow on hover or select
@@ -326,25 +373,26 @@ export default function DependencyCanvas({
         ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
         ctx.fillStyle = colorCfg.fill;
         ctx.fill();
-        ctx.lineWidth = (isSelected ? 2.5 : 1.5) / transformRef.current.k;
-        ctx.strokeStyle = isSelected ? '#ffffff' : colorCfg.stroke;
+        ctx.lineWidth = (isSelected || isRootCenter ? 2.5 : 1.5) / transformRef.current.k;
+        ctx.strokeStyle = isSelected || isRootCenter ? '#ffffff' : colorCfg.stroke;
         ctx.stroke();
 
         // Node labels
         const shouldShowLabel =
+          isRootCenter ||
           isHovered ||
           isSelected ||
-          (isNeighbor && transformRef.current.k > 0.7) ||
+          (isNeighbor && transformRef.current.k > 0.6) ||
           r > 9 ||
-          transformRef.current.k > 1.35;
+          transformRef.current.k > 1.25;
 
         if (shouldShowLabel && !isDimmed) {
-          const fontSize = Math.max(9, Math.min(13, 11 / transformRef.current.k));
-          ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+          const fontSize = Math.max(9, Math.min(13, (isRootCenter ? 12 : 11) / transformRef.current.k));
+          ctx.font = `${isRootCenter ? '700' : '600'} ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
 
-          const textY = n.y + r + 3;
+          const textY = n.y + r + 4;
           const text = n.name || n.id.split('.').pop();
 
           // Subtle text shadow backing for readability
@@ -352,7 +400,7 @@ export default function DependencyCanvas({
           const textWidth = ctx.measureText(text).width;
           ctx.fillRect(n.x - textWidth / 2 - 2, textY - 1, textWidth + 4, fontSize + 2);
 
-          ctx.fillStyle = isSelected ? '#ffffff' : isHovered ? '#38bdf8' : '#e2e8f0';
+          ctx.fillStyle = isRootCenter ? '#a5b4fc' : isSelected ? '#ffffff' : isHovered ? '#38bdf8' : '#e2e8f0';
           ctx.fillText(text, n.x, textY);
         }
 
@@ -507,43 +555,50 @@ export default function DependencyCanvas({
     <div className="relative w-full h-[600px] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden select-none" ref={containerRef}>
       {/* Top Floating Control Bar */}
       <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        {/* Left: Obsidian-style Local Focus Switcher */}
-        <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur border border-slate-800 px-2 py-1.5 rounded-lg shadow-lg pointer-events-auto">
+        {/* Left: Hop-Level Horizon Switcher (1-Hop, 2-Hop, 3-Hop only; No whole graph) */}
+        <div className="flex items-center gap-1.5 bg-slate-900/90 backdrop-blur border border-slate-800 px-2.5 py-1.5 rounded-lg shadow-lg pointer-events-auto">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
-            <Network className="w-3.5 h-3.5 text-indigo-400" /> Mode:
+            <Network className="w-3.5 h-3.5 text-indigo-400" /> Hop Horizon:
           </span>
           <button
-            onClick={() => setFocusMode('FULL')}
-            className={`px-2.5 py-1 text-xs font-medium rounded transition ${
-              focusMode === 'FULL'
+            onClick={() => setFocusMode('HOP_1')}
+            disabled={!selectedEntity}
+            className={`px-3 py-1 text-xs font-semibold rounded transition flex items-center gap-1.5 ${
+              focusMode === 'HOP_1'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
-            All Nodes ({displayNodes.length})
+            1-Hop Graph
           </button>
           <button
-            onClick={() => setFocusMode('LOCAL_1')}
+            onClick={() => setFocusMode('HOP_2')}
             disabled={!selectedEntity}
-            className={`px-2.5 py-1 text-xs font-medium rounded transition disabled:opacity-40 disabled:cursor-not-allowed ${
-              focusMode === 'LOCAL_1'
+            className={`px-3 py-1 text-xs font-semibold rounded transition flex items-center gap-1.5 ${
+              focusMode === 'HOP_2'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
-            Local (1-Hop)
+            2-Hop Graph
           </button>
           <button
-            onClick={() => setFocusMode('LOCAL_2')}
+            onClick={() => setFocusMode('HOP_3')}
             disabled={!selectedEntity}
-            className={`px-2.5 py-1 text-xs font-medium rounded transition disabled:opacity-40 disabled:cursor-not-allowed ${
-              focusMode === 'LOCAL_2'
+            className={`px-3 py-1 text-xs font-semibold rounded transition flex items-center gap-1.5 ${
+              focusMode === 'HOP_3'
                 ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
-            Local (2-Hop)
+            3-Hop Graph
           </button>
+
+          {selectedEntity && (
+            <span className="ml-2 pl-2 border-l border-slate-700 text-[11px] font-mono text-indigo-300 hidden md:inline">
+              Focused on <span className="font-bold text-white">{selectedEntity.name}</span> ({displayNodes.length} nodes)
+            </span>
+          )}
         </div>
 
         {/* Right: Camera Zoom Tools */}
@@ -607,8 +662,11 @@ export default function DependencyCanvas({
             </span>
           </div>
           <div className="text-[11px] text-slate-400 font-mono truncate">{hoveredNode.file_path}</div>
-          <div className="text-[10px] text-indigo-400 font-mono mt-1">
-            Connected Edges: {degreeMap.get(hoveredNode.id) || 0}
+          <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono">
+            <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded font-semibold border border-indigo-500/30">
+              {hoveredNode.hopDistance === 0 ? 'Root Center' : `${hoveredNode.hopDistance}-Hop Distance`}
+            </span>
+            <span className="text-slate-400">Edges: {degreeMap.get(hoveredNode.id) || 0}</span>
           </div>
         </div>
       )}
@@ -630,7 +688,7 @@ export default function DependencyCanvas({
         {/* Interaction Hint */}
         <div className="hidden sm:flex items-center gap-1.5 bg-slate-900/80 backdrop-blur border border-slate-800 px-2.5 py-1 rounded text-[11px] font-mono text-slate-400 pointer-events-auto">
           <Sparkles className="w-3 h-3 text-indigo-400" />
-          <span>Click node to inspect • Scroll to zoom • Drag to pan/rearrange</span>
+          <span>Click any node to re-center hop subgraph • Drag to pan/rearrange • Scroll to zoom</span>
         </div>
       </div>
     </div>
