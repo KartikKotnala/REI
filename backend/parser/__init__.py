@@ -8,6 +8,7 @@ code entity extraction, and repository parsing orchestration:
 - `GitService`: Concrete VCSProvider implementation for Git repositories.
 - `EntityExtractor`: Abstract interface for code symbol and entity extraction.
 - `ASTEntityExtractor`: Concrete EntityExtractor implementation using Python AST.
+- `TreeSitterExtractor`: Concrete EntityExtractor implementation using Tree-sitter CST.
 - `RepositoryOrchestrator`: High-level pipeline coordinator.
 - `GitRepoParser`: Backwards-compatible wrapper alias for RepositoryOrchestrator.
 - `parse_git_repository`: Functional composition root for repository parsing.
@@ -24,16 +25,17 @@ from backend.parser.repo_parser import (
     parse_repository,
     parse_smartfix_repository,
 )
+from backend.parser.tree_sitter_extractor import TreeSitterExtractor
 
 __all__ = [
     "VCSProvider",
     "GitService",
     "EntityExtractor",
     "ASTEntityExtractor",
+    "TreeSitterExtractor",
     "RepositoryOrchestrator",
     "GitRepoParser",
     "parse_git_repository",
     "parse_repository",
     "parse_smartfix_repository",
 ]
-

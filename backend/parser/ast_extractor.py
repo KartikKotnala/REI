@@ -363,3 +363,7 @@ class ASTEntityExtractor(ast.NodeVisitor, EntityExtractor):
         }
         self._entities.append(entity)
 
+
+
+# Re-export TreeSitterExtractor for convenience
+from backend.parser.tree_sitter_extractor import TreeSitterExtractor  # noqa: E402
