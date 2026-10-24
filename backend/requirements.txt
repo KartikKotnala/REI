@@ -12,6 +12,16 @@ networkx>=3.0
 scikit-learn>=1.4.0
 numpy>=1.26.0
 
-# Multi-Language Tree-sitter CST parsing
+# Multi-Language Tree-sitter CST parsing core
 tree-sitter>=0.22.0
+
+# Supported language grammars for TreeSitterExtractor
 tree-sitter-python>=0.21.0
+tree-sitter-typescript>=0.21.0
+tree-sitter-javascript>=0.21.0
+tree-sitter-java>=0.21.0
+tree-sitter-c>=0.21.0
+tree-sitter-rust>=0.21.0
+
+# Alternative all-in-one meta-package (optional)
+# tree-sitter-languages>=1.10.0
