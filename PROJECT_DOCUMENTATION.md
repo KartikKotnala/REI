@@ -157,35 +157,47 @@ All evaluation scenarios are grounded in the active codebase and pinned to versi
 
 ---
 
-## 8. Summary of Phase 1 Status & Phase 2 Roadmap
+## 8. Summary of Phase Status & Engineering Roadmap
 
 * **Phase 1 (Complete)**:
-  * AST parser, multi-relational dependency graph, and vector database fully implemented and verified on SmartFix.
-  * Formal data flows and Pydantic interfaces designed for both architectures.
-  * Sub-13B LLM candidate matrix defined.
-  * Evaluation scripts and 5 ground-truth benchmark scenarios configured.
-  * React dashboard built and verified with zero compilation errors.
+  * **AST Parser & Extraction Pipeline**: Fine-grained extraction of functions, classes, variables, attributes, imports, and route decorators (`backend/parser/ast_extractor.py`).
+  * **Multi-Relational Dependency Graph**: NetworkX graph generator building `DEFINES`, `CALLS`, `INHERITS_FROM`, `USES_VARIABLE`, `ATTRIBUTE_ACCESS`, and `HTTP_CALLS` edges (`backend/graph/dependency_graph.py`).
+  * **Vector Knowledge Base**: TF-IDF semantic vector space and cosine similarity retrieval over code chunks (`backend/vector_db/knowledge_base.py`).
+  * **Architectural Data Contracts**: Pydantic schemas for `CodeChangeInput`, `ImpactedEntity`, `StaticRAGRequest`, and `HybridAnalysisRequest` (`backend/architectures/contracts.py`).
+  * **VCS Integration & Dynamic Ingestion**: `GitService` and `RepositoryOrchestrator` providing repository resolution and git metadata inspection, eliminating hardcoded filesystem paths.
+  * **Web Application & UI Dashboard**: React 18 + Tailwind CSS + Lucide Icons dashboard with zero compilation errors across 5 main views.
+
 * **Phase 2 (In-Progress: Empirical Benchmarking & System Maturation)**:
-  * **1. Local Model Inference Integration**:
+  * **1. Interactive Visual Graph Horizon (1-Hop, 2-Hop, 3-Hop) [COMPLETED]**:
+    * Implemented localized hop-constrained graph visualization in `frontend/src/components/DependencyCanvas.jsx` and `DependencyGraphView.jsx`.
+    * Replaced the monolithic 'whole project' graph view with Breadth-First Search (BFS) neighborhood extraction:
+      * **1-Hop**: Immediate direct callers and callees.
+      * **2-Hop**: Second-degree transitive dependencies.
+      * **3-Hop**: Extended propagation paths.
+    * Added visual distinctions: root center entity highlighted with an indigo dashed halo, hop distance tags on hover tooltips, and interactive click-to-recenter graph navigation.
+  * **2. Tree-sitter Extractor & Multi-Language Core [COMPLETED]**:
+    * Implemented `TreeSitterExtractor` (`backend/parser/tree_sitter_extractor.py`) strictly conforming to REI's `EntityExtractor` interface via Dependency Inversion.
+    * Multi-language grammar mapping for Python, TypeScript/JavaScript, Java, C, and Rust.
+    * Integrated dual backend detection (modular wheels and meta-packages) with transparent fallback to `ASTEntityExtractor`.
+    * Updated `backend/requirements.txt` with tree-sitter core and language grammars.
+  * **3. Local Model Inference Integration [IN-PROGRESS]**:
     * Deploy and integrate local, private LLM inference runtimes (via Ollama, vLLM, or Hugging Face `transformers`) serving OpenAI-compatible endpoints (`http://localhost:11434/v1`).
     * Wire real sub-13B candidate models (`DeepSeek-Coder-1.3B/6.7B`, `Qwen2.5-Coder-1.5B/7B`, `Phi-3-mini-4K-Instruct 3.8B`) directly into the agent reasoning pipelines, replacing synthetic simulation mock outputs.
-  * **2. Live Model Evaluation & Ablation Suite**:
+  * **4. Live Model Evaluation & Ablation Suite [PLANNED]**:
     * Execute end-to-end benchmark runs computing real-time Precision, Recall, F1, MRR, MAP, and NDCG@5 metrics with zero artificial multipliers.
     * Conduct multi-agent ablation studies: quantify the marginal contribution and latency cost of individual agents (Call-Chain vs. Dataflow vs. REST Boundary vs. Consensus Re-ranker) against the baseline Static RAG pipeline.
-  * **3. Real-World Open-Source Target Repository Selection**:
+  * **5. Real-World Open-Source Target Repository Selection [PLANNED]**:
     * Evaluate and select production-grade target codebases for real-world impact validation:
+      * **`encode/httpx`**: Asynchronous networking client with deep call graphs, strict type hints, and clean client/transport/auth separation.
       * **`pallets/flask`**: Classic web framework rich in context locals, extension contracts, and dynamic request state mutations.
     * Extract real historical Pull Requests (PRs) featuring breaking signature changes, field deprecations, and test suite ripple effects to serve as objective ground-truth benchmark datasets.
-  * **4. Hyperparameter, Embedding & Retrieval Experimentation**:
+  * **6. Hyperparameter, Embedding & Retrieval Experimentation [PLANNED]**:
     * **LLM Selection Comparison**: Benchmarking impact reasoning fidelity across DeepSeek-Coder, Qwen2.5-Coder, Mistral-7B, and Phi-3-mini.
     * **Top-$K$ & Depth Tuning**: Parameter sweeps across vector retrieval cutoffs ($K \in [3, 5, 10, 20]$) and graph traversal search horizons (depth $D \in [1, 2, 3]$).
     * **Embedding Techniques**: Comparing sparse lexical search (TF-IDF / BM25) against dense code representations (`Nomic-Embed-Code`, `BGE-Code-v1.5`, `StarCoder2-3B`).
     * **Chunking Strategies**: Evaluating AST semantic chunking (per function/class boundary) versus fixed-size token chunking with sliding-window overlap.
     * **Retriever Comparison**: Evaluating Pure Vector RAG vs. Graph-Only Walk vs. Hybrid Graph-Vector Alpha Fusion ($\alpha \in [0.0, 1.0]$).
-  * **5. Interactive Visual DAG (Directed Acyclic Graph) Rendering**:
-    * Implement an interactive DAG visualization view in the React frontend (leveraging React Flow / `@xyflow/react`, D3.js, or Cytoscape.js).
-    * Visually render the directed dependency graph, caller-callee chains, and live impact propagation trees with severity heatmaps (Critical/High/Medium/Low) and traceable proof chains directly on the node canvas.
+
 * **Phase 3 (Upcoming: Universal Polyglot Engine & Dynamic Service Discovery)**:
-  * **Tree-sitter Integration**: Replacing language-specific AST walkers with unified Tree-sitter Concrete Syntax Tree (CST) parsers for high-throughput, incremental syntax processing.
-  * **Multi-Language Support**: Developing entity extractors and call-graph builders for TypeScript/JavaScript, Java, C, and Rust.
+  * **Polyglot Call-Graph Construction**: Extending `DependencyGraphBuilder` to resolve cross-language calls and module definitions across TypeScript/JavaScript, Java, C, and Rust.
   * **Dynamic Microservice Discovery**: Replacing hardcoded port/regex matching with dynamic service boundary detection via OpenAPI/Swagger specifications, Docker Compose/Kubernetes network manifests, and protobuf/gRPC contract definitions.
