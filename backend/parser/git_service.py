@@ -100,6 +100,46 @@ class VCSProvider(ABC):
         """
         pass
 
+    def get_commit_history(
+        self, repo_root: str, max_count: int = 50, branch: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves historical commit logs from the version control system.
+
+        Args:
+            repo_root: Absolute filesystem path to the repository root directory.
+            max_count: Maximum number of commits to retrieve (default: 50).
+            branch: Optional branch, tag, or ref to read history from.
+
+        Returns:
+            A list of commit dictionaries containing:
+                - 'hash': str, full commit hash
+                - 'short_hash': str, short (7-char) commit hash
+                - 'author': str, author name
+                - 'email': str, author email
+                - 'date': str, ISO formatted commit timestamp
+                - 'message': str, commit subject/summary
+                - 'files_changed': List[str], relative paths of files modified
+        """
+        return []
+
+    def get_commit_diff(
+        self, repo_root: str, commit_sha: str, context_lines: int = 3
+    ) -> str:
+        """
+        Retrieves the unified diff representation of a specific commit.
+
+        Args:
+            repo_root: Absolute filesystem path to the repository root directory.
+            commit_sha: Commit hash, revision, or ref identifier.
+            context_lines: Number of diff context lines (default: 3).
+
+        Returns:
+            The raw unified diff string of the changes introduced by the commit.
+        """
+        return ""
+
+
 
 class GitService(VCSProvider):
     """
@@ -397,4 +437,122 @@ class GitService(VCSProvider):
                 return res.stdout.decode("utf-8", errors="ignore")
             except Exception:
                 return ""
+
+    def get_commit_history(
+        self, repo_root: str, max_count: int = 50, branch: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves historical commit logs with modified file lists using Git CLI.
+
+        Args:
+            repo_root: Absolute filesystem path to the repository root directory.
+            max_count: Maximum number of commits to retrieve (default: 50).
+            branch: Optional branch, tag, or ref to read history from (e.g., 'main', 'HEAD').
+
+        Returns:
+            A list of commit dictionaries containing:
+                - 'hash': str, full commit hash
+                - 'short_hash': str, short (7-char) commit hash
+                - 'author': str, author name
+                - 'email': str, author email
+                - 'date': str, ISO formatted commit timestamp
+                - 'message': str, commit subject/summary
+                - 'files_changed': List[str], relative paths of files modified
+        """
+        cmd = [
+            "git",
+            "-C",
+            repo_root,
+            "log",
+            f"-n{max_count}",
+            "--pretty=format:COMMIT_RECORD%n%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%s",
+            "--name-only",
+        ]
+        if branch:
+            cmd.append(branch)
+
+        try:
+            output = self._run_git(cmd, cwd=repo_root)
+        except Exception as e:
+            logger.warning(f"Error querying git commit history in '{repo_root}': {e}")
+            return []
+
+        commits: List[Dict[str, Any]] = []
+        if not output:
+            return commits
+
+        records = output.split("COMMIT_RECORD\n")
+        for record in records:
+            record = record.strip()
+            if not record:
+                continue
+
+            lines = record.splitlines()
+            header_line = lines[0]
+            fields = header_line.split("\x1f")
+            if len(fields) < 6:
+                continue
+
+            commit_hash = fields[0]
+            short_hash = fields[1]
+            author = fields[2]
+            email = fields[3]
+            date_str = fields[4]
+            message = fields[5]
+            files_changed = [line.strip() for line in lines[1:] if line.strip()]
+
+            commits.append(
+                {
+                    "hash": commit_hash,
+                    "short_hash": short_hash,
+                    "author": author,
+                    "email": email,
+                    "date": date_str,
+                    "message": message,
+                    "files_changed": files_changed,
+                }
+            )
+
+        return commits
+
+    def get_commit_diff(
+        self, repo_root: str, commit_sha: str, context_lines: int = 3
+    ) -> str:
+        """
+        Retrieves the unified diff representation of a specific commit using Git CLI.
+
+        Args:
+            repo_root: Absolute filesystem path to the repository root directory.
+            commit_sha: Commit hash or revision identifier.
+            context_lines: Number of diff context lines (default: 3).
+
+        Returns:
+            The decoded unified diff string. Returns empty string if retrieval fails.
+        """
+        cmd = [
+            "git",
+            "-C",
+            repo_root,
+            "show",
+            f"-U{context_lines}",
+            "--patch",
+            "--no-color",
+            commit_sha,
+        ]
+        try:
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            try:
+                return res.stdout.decode("utf-8")
+            except UnicodeDecodeError:
+                return res.stdout.decode("latin-1", errors="ignore")
+        except Exception as e:
+            logger.warning(
+                f"Error retrieving commit diff for '{commit_sha}' in '{repo_root}': {e}"
+            )
+            return ""
 
