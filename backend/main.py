@@ -19,6 +19,8 @@ from backend.architectures.contracts import (
 )
 from backend.architectures.simulator import REIArchitectureSimulator
 from backend.evaluation.benchmark_dataset import get_benchmark_scenarios, get_benchmark_metadata
+from backend.evaluation.dynamic_benchmark import DynamicBenchmarkGenerator
+from backend.evaluation.model_selector import ModelSelectionEngine, SELECTION_PROFILES
 from backend.evaluation.eval_metrics import evaluate_architecture_performance, compute_prediction_quality
 from backend.evaluation.comprehensive_eval import run_comprehensive_evaluation
 from backend.llm.ollama_client import check_ollama_status
@@ -38,6 +40,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import urllib.parse
+import logging
+from backend.parser.git_service import GitService
+
+logger = logging.getLogger(__name__)
+
+PRESET_REPOSITORIES = [
+    {
+        "id": "pallets/flask",
+        "name": "Flask",
+        "description": "Python web microframework",
+        "git_url": "https://github.com/pallets/flask",
+        "stars": "66k+",
+    },
+    {
+        "id": "psf/requests",
+        "name": "Requests",
+        "description": "HTTP for Humans",
+        "git_url": "https://github.com/psf/requests",
+        "stars": "51k+",
+    },
+    {
+        "id": "pallets/click",
+        "name": "Click",
+        "description": "Composable CLI creation toolkit",
+        "git_url": "https://github.com/pallets/click",
+        "stars": "15k+",
+    },
+    {
+        "id": "tiangolo/fastapi",
+        "name": "FastAPI",
+        "description": "Modern high-performance web framework",
+        "git_url": "https://github.com/tiangolo/fastapi",
+        "stars": "75k+",
+    },
+    {
+        "id": "SmartFix",
+        "name": "SmartFix",
+        "description": "Active REI Workspace & Local Monorepo Testbed",
+        "git_url": "",
+        "stars": "Local",
+    },
+]
+
 FLASK_GIT_URL = "https://github.com/pallets/flask"
 current_target = "pallets/flask"
 parser_data_cache: Dict[str, Any] = {}
@@ -45,25 +91,66 @@ graph_json_cache: Dict[str, Any] = {}
 vector_kb_cache: Any = None
 simulator: Any = None
 comprehensive_eval_cache: Any = None
+dynamic_benchmark_cache: Any = None
 
 
-def load_repository(target: str = "pallets/flask"):
-    global parser_data_cache, graph_json_cache, vector_kb_cache, simulator, current_target, comprehensive_eval_cache
+def normalize_git_target(target: str):
+    """
+    Normalizes a repository target string into a (display_name, git_url_or_none) tuple.
+    Handles shorthand 'owner/repo', full https/ssh URLs, and preset names.
+    """
+    target = (target or "").strip()
+    if not target or target.lower() == "smartfix":
+        return "SmartFix", None
+
+    # Check preset matches
+    for p in PRESET_REPOSITORIES:
+        if target.lower() in [p["id"].lower(), p["name"].lower()]:
+            return p["id"], p["git_url"] or None
+
+    # Full git URL
+    if target.startswith("http://") or target.startswith("https://") or target.startswith("git@") or target.startswith("ssh://"):
+        parsed = urllib.parse.urlparse(target)
+        path = parsed.path.strip("/").removesuffix(".git")
+        display = path if path else target
+        return display, target
+
+    # Shorthand 'owner/repo'
+    if "/" in target and not target.startswith("."):
+        parts = [p for p in target.split("/") if p]
+        if len(parts) == 2:
+            return target, f"https://github.com/{target}"
+
+    return target, None
+
+
+def load_repository(target: str = "pallets/flask") -> float:
+    global parser_data_cache, graph_json_cache, vector_kb_cache, simulator, current_target, comprehensive_eval_cache, dynamic_benchmark_cache
     comprehensive_eval_cache = None
-    print(f"Loading target repository: {target}...")
-    if "flask" in target.lower():
-        parser_data_cache = parse_git_repository(git_url=FLASK_GIT_URL)
-        current_target = "pallets/flask"
-    else:
-        parser_data_cache = parse_smartfix_repository()
-        current_target = "SmartFix"
+    dynamic_benchmark_cache = None
+    start_t = time.time()
+    display_name, git_url = normalize_git_target(target)
+    print(f"Loading target repository: '{display_name}' (Git URL: {git_url})...")
 
-    graph_builder = DependencyGraphBuilder(parser_data_cache)
-    graph_builder.build_graph()
-    graph_json_cache = graph_builder.to_json()
-    vector_kb_cache = build_smartfix_vector_kb(parser_data_cache)
-    simulator = REIArchitectureSimulator(parser_data=parser_data_cache)
-    print(f"Target repository '{current_target}' initialized! ({parser_data_cache['total_entities']} entities, {graph_json_cache['total_nodes']} nodes, {graph_json_cache['total_edges']} edges)")
+    try:
+        if git_url:
+            parser_data_cache = parse_git_repository(git_url=git_url)
+            current_target = display_name
+        else:
+            parser_data_cache = parse_smartfix_repository()
+            current_target = "SmartFix"
+
+        graph_builder = DependencyGraphBuilder(parser_data_cache)
+        graph_builder.build_graph()
+        graph_json_cache = graph_builder.to_json()
+        vector_kb_cache = build_smartfix_vector_kb(parser_data_cache)
+        simulator = REIArchitectureSimulator(parser_data=parser_data_cache)
+        duration = round((time.time() - start_t) * 1000, 1)
+        print(f"Target repository '{current_target}' initialized in {duration}ms! ({parser_data_cache.get('total_entities', 0)} entities, {graph_json_cache.get('total_nodes', 0)} nodes, {graph_json_cache.get('total_edges', 0)} edges)")
+        return duration
+    except Exception as e:
+        logger.error(f"Failed to load repository '{target}': {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to load repository '{target}': {str(e)}")
 
 
 # Initialize with pallets/flask by default
@@ -88,29 +175,62 @@ def health_check():
         "status": "online",
         "system": "Repository Evolution Intelligence (REI)",
         "target_repo": current_target,
-        "repo_name": parser_data_cache.get("repo_name", "flask"),
-        "git_url": FLASK_GIT_URL if "flask" in current_target.lower() else "",
+        "repo_name": parser_data_cache.get("repo_name", current_target),
+        "git_url": parser_data_cache.get("git_remote", FLASK_GIT_URL if "flask" in current_target.lower() else ""),
         "benchmark_version": benchmark_meta["version"],
         "benchmark_testbed": benchmark_meta["testbed"],
-        "git_branch": parser_data_cache.get("git_branch", ""),
+        "git_branch": parser_data_cache.get("git_branch", "main"),
         "git_commit": parser_data_cache.get("git_commit", ""),
-        "entities_count": parser_data_cache["total_entities"],
-        "graph_nodes": graph_json_cache["total_nodes"],
-        "graph_edges": graph_json_cache["total_edges"],
+        "entities_count": parser_data_cache.get("total_entities", 0),
+        "graph_nodes": graph_json_cache.get("total_nodes", 0),
+        "graph_edges": graph_json_cache.get("total_edges", 0),
         "ollama": ollama_info,
+    }
+
+
+@app.get("/api/repository/presets")
+def get_repository_presets():
+    return {
+        "presets": PRESET_REPOSITORIES,
+        "active_target": current_target,
+    }
+
+
+@app.post("/api/repository/validate")
+def validate_repository_url(req: TargetRepoRequest):
+    display_name, git_url = normalize_git_target(req.target)
+    if not git_url:
+        return {
+            "valid": True,
+            "target": display_name,
+            "git_url": "",
+            "message": "Local repository target recognized."
+        }
+
+    vcs = GitService()
+    is_valid = vcs.validate_remote_url(git_url)
+    return {
+        "valid": is_valid,
+        "target": display_name,
+        "git_url": git_url,
+        "message": "Repository is accessible on remote Git host." if is_valid else "Repository could not be reached via Git CLI. Verify the URL is public and correctly typed."
     }
 
 
 @app.post("/api/repository/target")
 def switch_target_repository(req: TargetRepoRequest):
-    load_repository(req.target)
+    duration = load_repository(req.target)
     return {
         "status": "success",
         "target": current_target,
-        "repo_name": parser_data_cache.get("repo_name"),
-        "entities_count": parser_data_cache["total_entities"],
-        "graph_nodes": graph_json_cache["total_nodes"],
-        "graph_edges": graph_json_cache["total_edges"],
+        "repo_name": parser_data_cache.get("repo_name", current_target),
+        "git_url": parser_data_cache.get("git_remote", ""),
+        "git_branch": parser_data_cache.get("git_branch", "main"),
+        "git_commit": parser_data_cache.get("git_commit", ""),
+        "entities_count": parser_data_cache.get("total_entities", 0),
+        "graph_nodes": graph_json_cache.get("total_nodes", 0),
+        "graph_edges": graph_json_cache.get("total_edges", 0),
+        "processing_time_ms": duration,
     }
 
 
@@ -133,6 +253,134 @@ def get_entities(limit: int = 100, entity_type: Optional[str] = None):
 @app.get("/api/graph/dependency")
 def get_dependency_graph():
     return graph_json_cache
+
+
+@app.get("/api/graph/hubs")
+def get_graph_hubs(top_k: int = 25):
+    """
+    Returns the top-K architectural hub entities by total degree centrality for default overview.
+    """
+    g = getattr(simulator, "nx_graph", None)
+    if not g or len(g.nodes) == 0:
+        return {"hubs": [], "total_graph_nodes": 0, "total_graph_edges": 0}
+
+    degrees = dict(g.degree())
+    sorted_nodes = sorted(degrees.items(), key=lambda x: x[1], reverse=True)[:top_k]
+
+    hubs = []
+    for nid, deg in sorted_nodes:
+        ndata = g.nodes.get(nid, {})
+        hubs.append({
+            "id": nid,
+            "name": ndata.get("name", nid),
+            "type": ndata.get("type", "class"),
+            "file_path": ndata.get("file_path", ""),
+            "degree": deg,
+            "in_degree": g.in_degree(nid) if hasattr(g, "in_degree") else 0,
+            "out_degree": g.out_degree(nid) if hasattr(g, "out_degree") else 0,
+        })
+
+    return {
+        "count": len(hubs),
+        "total_graph_nodes": len(g.nodes),
+        "total_graph_edges": len(g.edges),
+        "hubs": hubs,
+    }
+
+
+@app.get("/api/graph/path-trace")
+def trace_dependency_path(source: str, target: str):
+    """
+    Finds the shortest transitive dependency path between two entities in the active repository graph.
+    """
+    import networkx as nx
+    g = getattr(simulator, "nx_graph", None)
+    if not g or len(g.nodes) == 0:
+        raise HTTPException(status_code=400, detail="Dependency graph not initialized")
+
+    def match_node(query: str):
+        if g.has_node(query):
+            return query
+        q_lower = query.lower()
+        for n in g.nodes:
+            if q_lower == n.lower() or q_lower in n.lower():
+                return n
+        return None
+
+    src_node = match_node(source)
+    tgt_node = match_node(target)
+
+    if not src_node:
+        raise HTTPException(status_code=404, detail=f"Source entity '{source}' not found in dependency graph")
+    if not tgt_node:
+        raise HTTPException(status_code=404, detail=f"Target entity '{target}' not found in dependency graph")
+
+    if src_node == tgt_node:
+        return {
+            "connected": True,
+            "path_type": "SAME_NODE",
+            "hop_distance": 0,
+            "source": src_node,
+            "target": tgt_node,
+            "path_nodes": [{"id": src_node, "name": g.nodes[src_node].get("name", src_node), "type": g.nodes[src_node].get("type", "function")}],
+            "path_edges": [],
+        }
+
+    try:
+        # Check directed path first
+        if nx.has_path(g, src_node, tgt_node):
+            path_nodes = nx.shortest_path(g, src_node, tgt_node)
+            path_type = "DIRECTED_FORWARD"
+        elif nx.has_path(g, tgt_node, src_node):
+            path_nodes = nx.shortest_path(g, tgt_node, src_node)
+            path_type = "DIRECTED_REVERSE"
+        else:
+            # Fall back to undirected connectivity
+            undirected_g = g.to_undirected()
+            if nx.has_path(undirected_g, src_node, tgt_node):
+                path_nodes = nx.shortest_path(undirected_g, src_node, tgt_node)
+                path_type = "UNDIRECTED_TRANSITIVE"
+            else:
+                return {
+                    "connected": False,
+                    "source": src_node,
+                    "target": tgt_node,
+                    "path_nodes": [],
+                    "path_edges": [],
+                    "message": f"No dependency propagation path exists between '{src_node}' and '{tgt_node}'."
+                }
+
+        path_edges = []
+        for i in range(len(path_nodes) - 1):
+            u, v = path_nodes[i], path_nodes[i + 1]
+            edge_data = g.get_edge_data(u, v) or g.get_edge_data(v, u) or {}
+            path_edges.append({
+                "source": u,
+                "target": v,
+                "relation": edge_data.get("relation", "DEPENDS_ON")
+            })
+
+        node_details = []
+        for nid in path_nodes:
+            ndata = g.nodes.get(nid, {})
+            node_details.append({
+                "id": nid,
+                "name": ndata.get("name", nid),
+                "type": ndata.get("type", "function"),
+                "file_path": ndata.get("file_path", "")
+            })
+
+        return {
+            "connected": True,
+            "path_type": path_type,
+            "hop_distance": len(path_nodes) - 1,
+            "source": src_node,
+            "target": tgt_node,
+            "path_nodes": node_details,
+            "path_edges": path_edges,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error tracing path: {str(e)}")
 
 
 @app.post("/api/vector-db/search")
@@ -248,6 +496,84 @@ def get_comprehensive_evaluation(force_refresh: bool = False):
             simulator=simulator,
         )
     return comprehensive_eval_cache
+
+
+class ModelAutoSelectRequest(BaseModel):
+    profile: str = "BALANCED"  # 'BALANCED' | 'SAFETY_CRITICAL' | 'LOW_LATENCY_CICD'
+    apply_winner: bool = True
+
+
+@app.get("/api/eval/dynamic-benchmark")
+def get_dynamic_benchmark(force_refresh: bool = False):
+    """
+    Returns dynamically generated evaluation scenarios tailored to the active repository.
+    Extracts real historical Git commits or architectural graph hubs.
+    """
+    global dynamic_benchmark_cache
+    if dynamic_benchmark_cache is None or force_refresh:
+        generator = DynamicBenchmarkGenerator(
+            parser_data=parser_data_cache,
+            nx_graph=getattr(simulator, "nx_graph", None)
+        )
+        scenarios = generator.generate_scenarios(max_scenarios=5)
+        dynamic_benchmark_cache = {
+            "status": "success",
+            "repository": current_target,
+            "repo_name": parser_data_cache.get("repo_name", current_target),
+            "benchmark_version": "v2.0-dynamic",
+            "scenario_count": len(scenarios),
+            "scenarios": scenarios,
+        }
+    return dynamic_benchmark_cache
+
+
+@app.get("/api/models/profiles")
+def get_model_selection_profiles():
+    """
+    Returns available multi-criteria model selection profiles and current primary model.
+    """
+    return {
+        "profiles": SELECTION_PROFILES,
+        "current_primary_model": CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"],
+    }
+
+
+@app.post("/api/models/auto-select")
+def auto_select_model(req: ModelAutoSelectRequest):
+    """
+    Evaluates candidate LLM models on the active repository's dynamic scenarios,
+    computes composite utility scores across Precision, Recall, F1, MRR, NDCG@5,
+    Grounding/Hallucination, and Latency, and auto-applies the winning model.
+    """
+    generator = DynamicBenchmarkGenerator(
+        parser_data=parser_data_cache,
+        nx_graph=getattr(simulator, "nx_graph", None)
+    )
+    scenarios = generator.generate_scenarios(max_scenarios=5)
+
+    selector = ModelSelectionEngine(simulator=simulator, parser_data=parser_data_cache)
+    result = selector.evaluate_and_rank_models(scenarios=scenarios, profile_key=req.profile)
+
+    if req.apply_winner and result.get("recommended_model"):
+        winner_id = result["recommended_model"]["model_id"]
+        selector.apply_model(winner_id)
+        result["auto_applied"] = True
+        result["active_model"] = winner_id
+
+    return result
+
+
+class ApplyModelRequest(BaseModel):
+    model_id: str
+
+
+@app.post("/api/models/apply")
+def manually_apply_model(req: ApplyModelRequest):
+    """
+    Manually activates a specific model as the primary inference engine.
+    """
+    selector = ModelSelectionEngine(simulator=simulator, parser_data=parser_data_cache)
+    return selector.apply_model(req.model_id)
 
 
 if __name__ == "__main__":

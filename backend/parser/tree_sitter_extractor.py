@@ -30,6 +30,7 @@ EXTENSION_TO_LANGUAGE: Dict[str, str] = {
     ".c": "c",
     ".h": "c",
     ".rs": "rust",
+    ".php": "php",
 }
 
 
@@ -120,6 +121,9 @@ class TreeSitterLanguageManager:
                 elif language_name == "rust":
                     import tree_sitter_rust
                     lang_obj = Language(tree_sitter_rust.language())
+                elif language_name == "php":
+                    import tree_sitter_php
+                    lang_obj = Language(tree_sitter_php.language_php())
 
                 if lang_obj:
                     # In modern tree-sitter (0.22+), Language is passed to Parser
@@ -190,8 +194,8 @@ class TreeSitterExtractor(EntityExtractor):
         ext = "." + relative_path.rsplit(".", 1)[-1].lower() if "." in relative_path else ""
         self._language = language or EXTENSION_TO_LANGUAGE.get(ext, "python")
         self._module_name = relative_path.replace("/", ".").replace("\\", ".")
-        if ext:
-            self._module_name = self._module_name.rstrip(ext)
+        if ext and self._module_name.endswith(ext):
+            self._module_name = self._module_name[:-len(ext)]
 
         self._entities: List[Dict[str, Any]] = []
         self._imports: List[Dict[str, Any]] = []
@@ -275,16 +279,17 @@ class TreeSitterExtractor(EntityExtractor):
         ntype = node.type
 
         # Dispatch based on CST node type
-        if ntype in ("class_definition", "class_declaration", "interface_declaration"):
+        if ntype in ("class_definition", "class_declaration", "interface_declaration", "trait_declaration"):
             self._handle_class_node(node)
         elif ntype in (
             "function_definition",
             "function_declaration",
             "method_definition",
+            "method_declaration",
             "arrow_function",
         ):
             self._handle_function_node(node)
-        elif ntype in ("import_statement", "import_from_statement"):
+        elif ntype in ("import_statement", "import_from_statement", "namespace_use_declaration"):
             self._handle_import_node(node)
         elif ntype in ("assignment", "variable_declaration", "lexical_declaration"):
             self._handle_assignment_node(node)
@@ -515,6 +520,19 @@ class TreeSitterExtractor(EntityExtractor):
                     "source_file": self._relative_path,
                 }
             )
+        elif ntype == "namespace_use_declaration":
+            # PHP: use Facebook\Exceptions\FacebookResponseException;
+            for child in node.children:
+                if child.type == "namespace_use_clause":
+                    clause_text = self._get_node_text(child).strip()
+                    self._imports.append(
+                        {
+                            "type": "use",
+                            "name": clause_text,
+                            "asname": None,
+                            "source_file": self._relative_path,
+                        }
+                    )
 
     def _handle_assignment_node(self, node: Any) -> None:
         """Extracts variable and attribute definitions."""

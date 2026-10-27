@@ -99,7 +99,22 @@ class RepositoryOrchestrator:
         python_files: List[str] = []
 
         target_exts: Tuple[str, ...] = (
-            tuple(file_extensions) if file_extensions else (".py",)
+            tuple(file_extensions)
+            if file_extensions
+            else (
+                ".py",
+                ".ts",
+                ".tsx",
+                ".js",
+                ".jsx",
+                ".mjs",
+                ".cjs",
+                ".java",
+                ".c",
+                ".h",
+                ".rs",
+                ".php",
+            )
         )
 
         for rel_path in tracked_files:

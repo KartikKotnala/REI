@@ -71,8 +71,17 @@ class GitRepoParser(RepositoryOrchestrator):
             vcs_provider: Optional concrete VCSProvider (defaults to GitService).
             extractor_cls: Optional concrete EntityExtractor (defaults to ASTEntityExtractor).
         """
-        vcs = vcs_provider or GitService(cache_dir=cache_dir)
-        extractor = extractor_cls or ASTEntityExtractor
+        if extractor_cls is not None:
+            extractor = extractor_cls
+        else:
+            try:
+                from backend.parser.tree_sitter_extractor import TreeSitterExtractor, TreeSitterLanguageManager
+                if TreeSitterLanguageManager.is_available():
+                    extractor = TreeSitterExtractor
+                else:
+                    extractor = ASTEntityExtractor
+            except Exception:
+                extractor = ASTEntityExtractor
         super().__init__(vcs_provider=vcs, extractor_cls=extractor)
 
 
@@ -90,7 +99,7 @@ def parse_git_repository(
 
     Acts as the **Composition Root**:
     1. Determines which `VCSProvider` to use (defaults to `GitService`).
-    2. Determines which `EntityExtractor` to use (defaults to `ASTEntityExtractor`).
+    2. Determines which `EntityExtractor` to use (TreeSitterExtractor when available, ASTEntityExtractor fallback).
     3. Injects both into `RepositoryOrchestrator` and runs the parsing pipeline.
 
     Args:
@@ -98,7 +107,7 @@ def parse_git_repository(
         ref: Optional commit, branch, or tag reference (e.g., 'HEAD', 'main').
         git_url: Optional remote Git URL to clone or locate in cache.
         cache_dir: Optional directory for cached remote repository clones.
-        file_extensions: List of extensions to extract AST entities from (default: ['.py']).
+        file_extensions: List of extensions to extract AST entities from (default: multi-language).
         vcs_provider: Custom VCS provider implementing the `VCSProvider` interface.
         extractor_cls: Custom entity extractor class implementing the `EntityExtractor` interface.
 
@@ -107,7 +116,17 @@ def parse_git_repository(
     """
     target = git_url or repo_path
     vcs = vcs_provider or GitService(cache_dir=cache_dir)
-    extractor = extractor_cls or ASTEntityExtractor
+    if extractor_cls is not None:
+        extractor = extractor_cls
+    else:
+        try:
+            from backend.parser.tree_sitter_extractor import TreeSitterExtractor, TreeSitterLanguageManager
+            if TreeSitterLanguageManager.is_available():
+                extractor = TreeSitterExtractor
+            else:
+                extractor = ASTEntityExtractor
+        except Exception:
+            extractor = ASTEntityExtractor
     orchestrator = RepositoryOrchestrator(vcs_provider=vcs, extractor_cls=extractor)
     return orchestrator.parse(target, ref=ref, file_extensions=file_extensions)
 

@@ -270,18 +270,30 @@ class GitService(VCSProvider):
         if repo_name.endswith(".git"):
             repo_name = repo_name[:-4]
 
+        # Use sanitized owner_repo for unique cache directories if available
+        parts = [p for p in url_path.split("/") if p]
+        cache_subname = f"{parts[-2]}_{repo_name}" if len(parts) >= 2 else repo_name
+
         # 1. Check bundled fixtures under tests/fixtures/<repo_name>
         project_root = Path(__file__).resolve().parent.parent.parent
         fixture_dir = project_root / "tests" / "fixtures" / repo_name
         if fixture_dir.exists() and (fixture_dir / ".git").exists():
             return str(fixture_dir)
 
-        # 2. Check local cache directory
-        target_dir = self.cache_dir / repo_name
+        # 2. Check local cache directory (try unique owner_repo first, then repo_name)
+        target_dir = self.cache_dir / cache_subname
+        if not target_dir.exists():
+            target_dir = self.cache_dir / repo_name
+
         if target_dir.exists() and (target_dir / ".git").exists():
             return str(target_dir)
 
         # 3. Clone repository
+        target_dir = self.cache_dir / cache_subname
+        if target_dir.exists():
+            import shutil
+            shutil.rmtree(str(target_dir), ignore_errors=True)
+
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         try:
             subprocess.run(
@@ -289,6 +301,7 @@ class GitService(VCSProvider):
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=90,
             )
             return str(target_dir)
         except Exception as e:
@@ -297,6 +310,21 @@ class GitService(VCSProvider):
             raise RuntimeError(
                 f"Failed to clone remote git repository from {git_url}: {e}"
             )
+
+    def validate_remote_url(self, git_url: str) -> bool:
+        """
+        Validates whether a remote git repository URL is accessible via Git CLI.
+        """
+        try:
+            res = subprocess.run(
+                ["git", "ls-remote", "--exit-code", git_url, "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=12,
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
 
     def get_metadata(self, repo_root: str) -> Dict[str, Any]:
         """

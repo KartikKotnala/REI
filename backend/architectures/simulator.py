@@ -28,6 +28,7 @@ from backend.llm.ollama_client import (
     run_ollama_risk_summarization,
     run_ollama_agent_reasoning,
 )
+from backend.architectures.ollama_client import ollama_client
 
 
 class REIArchitectureSimulator:
@@ -122,7 +123,7 @@ class REIArchitectureSimulator:
         llm_model_name = CANDIDATE_MODELS_MATRIX["impact_reasoning"]["primary_model"]
         llm_status = "COMPLETED (Simulated)"
 
-        if ollama_client.is_available():
+        if enable_live_llm and ollama_client.is_available():
             active_model = ollama_client.resolve_best_model()
             prompt = (
                 f"Analyze the change impact of modifying '{target}'. "
@@ -195,6 +196,8 @@ class REIArchitectureSimulator:
         ollama_status = check_ollama_status()
         is_live = False
         active_m = ollama_status.get("active_model")
+        ollama_active = ollama_client.is_available()
+        active_llm = active_m or (ollama_client.resolve_best_model() if ollama_active else None)
 
         call_reasoning = "Traced function signatures and call-graph dependencies from modified symbol."
         dataflow_reasoning = "Analyzed variable and attribute mutation side-effects across retrieved candidate scope."

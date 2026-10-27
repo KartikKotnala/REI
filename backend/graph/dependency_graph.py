@@ -41,7 +41,9 @@ class DependencyGraphBuilder:
             # DEFINES relationships
             if etype in ["function", "class", "variable", "endpoint"]:
                 file_path = entity["file_path"]
-                module_id = file_path.replace("/", ".").rstrip(".py")
+                ext_idx = file_path.rfind(".")
+                cleaned_path = file_path[:ext_idx] if ext_idx != -1 else file_path
+                module_id = cleaned_path.replace("/", ".").replace("\\", ".")
                 if module_id in self.entities and module_id != eid:
                     self.graph.add_edge(module_id, eid, relation="DEFINES")
 
@@ -87,6 +89,18 @@ class DependencyGraphBuilder:
                         same_file = [t for t in candidates if self.entities[t].get("file_path") == entity.get("file_path")]
                         for target_id in (same_file if same_file else candidates[:2]):
                             self.graph.add_edge(eid, target_id, relation="ATTRIBUTE_ACCESS")
+
+        # IMPORTS relationships
+        for imp in self.imports:
+            source_file = imp.get("source_file", "")
+            ext_idx = source_file.rfind(".")
+            source_mod = (source_file[:ext_idx] if ext_idx != -1 else source_file).replace("/", ".").replace("\\", ".")
+            imp_name = imp.get("name", "")
+            imp_mod = imp.get("module", "")
+            for target_id in self.entities:
+                if (imp_mod and target_id == imp_mod) or (imp_name and (target_id == imp_name or target_id.endswith(f".{imp_name}"))):
+                    if source_mod in self.entities and source_mod != target_id:
+                        self.graph.add_edge(source_mod, target_id, relation="IMPORTS")
 
         # HTTP_CALLS cross-service connections for SmartFix Microservices
         self._add_smartfix_http_edges()
